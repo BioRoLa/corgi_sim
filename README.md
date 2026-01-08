@@ -6,7 +6,14 @@ ROS2 simulation package for the Corgi quadruped robot using Webots.
 
 This package provides a complete simulation environment for the Corgi robot with:
 
-- **Embedded Webots controller** - Runs directly inside Webots for reliable communication
+- **Two launch modes available**:
+  - **Embedded controller mode** - Python controller runs inside Webots (new, experimental)
+  - **External driver mode** - Uses `webots_ros2_driver` with plugin architecture (legacy, stable)
+    - webots ros2 plugin required:
+    ```bash
+    sudo apt update
+    sudo apt install -y ros-humble-webots-ros2
+    ```
 - **Topic-based motor control** - Standard ROS2 pattern using `std_msgs/Float64`
 - **Theta-beta coordinate system** - Custom leg control coordinates for 2-motor-per-leg design
 - **Multiple simulation nodes** - Position and torque control modes
@@ -14,13 +21,15 @@ This package provides a complete simulation environment for the Corgi robot with
 
 ## Architecture
 
+### Mode 1: Embedded Controller (Default - `run_simulation.launch.py`)
+
 ```
 Webots Simulator
   └─ corgi_ros2 (Python controller, runs inside Webots)
       ├─ Publishes: /motor_name_sensor/value (encoder feedback)
       └─ Subscribes: /motor_name/set_position (motor commands)
           ↕
-corgi_sim_trq (C++ ROS2 node, runs externally)
+corgi_sim_trq or corgi_sim_pos (C++ ROS2 node, runs externally)
   ├─ Subscribes: /motor/command (MotorCmdStamped - theta/beta coords)
   ├─ Publishes: /motor/state (MotorStateStamped - feedback)
   └─ Converts theta-beta ↔ motor angles (phi_r, phi_l)
@@ -28,6 +37,25 @@ corgi_sim_trq (C++ ROS2 node, runs externally)
 Controller (e.g., corgi_csv_control)
   └─ Publishes: /motor/command
 ```
+
+### Mode 2: External Driver (Experimental - `Corgi_launch.py`)
+
+```
+Webots Simulator
+  └─ CorgiRobot (controller = "<extern>")
+      ↕
+webots_ros2_driver (ROS2 node)
+  ├─ Loads: corgi_driver_pkg.corgi_driver.CorgiDriver plugin
+  ├─ Publishes: /motor/state, /imu, /clock
+  └─ Subscribes: /motor/command
+      ↕
+Controller (e.g., corgi_csv_control)
+  └─ Publishes: /motor/command
+```
+
+**Key Differences:**
+- **Embedded mode**: Controller runs *inside* Webots process, more reliable
+- **External driver mode**: Uses ROS 2 plugin architecture, more flexible but requires proper Python package setup
 
 ## Quick Start
 
@@ -41,6 +69,8 @@ source install/setup.bash
 
 ### 2. Launch Simulation
 
+#### Option A: Embedded Controller (Recommended)
+
 ```bash
 # Start Webots and simulation node
 ros2 launch corgi_sim run_simulation.launch.py
@@ -51,6 +81,22 @@ This will:
 - Launch Webots with the Corgi robot world
 - Start the `corgi_sim_trq` node (3 second delay to allow Webots to initialize)
 - Set up all topics for motor control and feedback
+
+#### Option B: External Driver (Experimental)
+
+```bash
+# Start Webots with external driver plugin
+ros2 launch corgi_sim Corgi_launch.py
+```
+
+This will:
+
+- Launch Webots with `IFS_Proto.wbt` world
+- Start the `webots_ros2_driver` node
+- Load the `corgi_driver_pkg.corgi_driver.CorgiDriver` plugin
+- Directly publish/subscribe to `/motor/command` and `/motor/state` topics
+
+**Note**: The external driver mode requires the `corgi_driver_pkg` Python package to be properly installed. If you get `ModuleNotFoundError`, ensure you've rebuilt the package with `colcon build --packages-select corgi_sim`.
 
 ### 3. Run a Controller
 
@@ -72,7 +118,8 @@ ros2 run corgi_csv_control corgi_csv_control demo_walk_sim --ros-args -p use_sim
 
 ### Launch Files
 
-- `launch/run_simulation.launch.py` - Main launch file for simulation
+- `launch/run_simulation.launch.py` - **Main launch file** (embedded controller mode)
+- `launch/Corgi_launch.py` - **Alternative launch file** (external driver mode, experimental)
 
 ### Executables
 
@@ -81,8 +128,19 @@ ros2 run corgi_csv_control corgi_csv_control demo_walk_sim --ros-args -p use_sim
 
 ### Controllers (Webots-side)
 
-- `controllers/corgi_ros2/corgi_ros2.py` - Embedded Python controller running inside Webots
+- `controllers/corgi_ros2/corgi_ros2.py` - Embedded Python controller running inside Webots (used by `run_simulation.launch.py`)
 - `controllers/force_plate/force_plate.py` - Force plate controller for specialized worlds
+
+### Python Driver Package
+
+- `corgi_driver_pkg/` - External ROS 2 driver plugin package (used by `Corgi_launch.py`)
+  - `corgi_driver.py` - Main `CorgiDriver` plugin class for `webots_ros2_driver`
+  - `Controller_TB.py` - Theta-beta coordinate conversion utilities
+  - `__init__.py` - Package initialization
+
+### Resource Files
+
+- `resource/corgi.urdf` - Robot description for external driver mode (references `corgi_driver_pkg.corgi_driver.CorgiDriver`)
 
 ### Worlds
 
@@ -186,12 +244,47 @@ motor_cmd_pub->publish(cmd);
 
 ### Modifying the Webots Controller
 
-The embedded controller is at `controllers/corgi_ros2/corgi_ros2.py`. Key features:
-
-- Runs inside Webots process (no network communication)
+**For embedded controller mode** (`run_simulation.launch.py`):
+- Edit `controllers/corgi_ros2/corgi_ros2.py`
+- This runs inside Webots process (no network communication)
 - Publishes encoder values at simulation rate
 - Subscribes to motor position commands
 - Handles NaN guards for safety
+
+**For external driver mode** (`Corgi_launch.py`):
+- Edit `corgi_driver_pkg/corgi_driver.py`
+- This is a ROS 2 plugin loaded by `webots_ros2_driver`
+- Must inherit from `Supervisor` and implement the plugin interface
+- Requires rebuild after changes: `colcon build --packages-select corgi_sim`
+
+### Creating a Custom External Driver Plugin
+
+If you want to create a new external driver:
+
+1. **Create the plugin file** in `corgi_driver_pkg/`:
+   ```python
+   from controller import Supervisor
+   
+   class MyCustomDriver:
+       def init(self, webots_node, properties):
+           self.__robot = webots_node.robot
+           # Initialize your plugin
+       
+       def step(self):
+           # Called every simulation step
+           pass
+   ```
+
+2. **Update URDF** (`resource/corgi.urdf`):
+   ```xml
+   <plugin type="corgi_driver_pkg.my_custom_driver.MyCustomDriver" />
+   ```
+
+3. **Rebuild**:
+   ```bash
+   colcon build --packages-select corgi_sim
+   source install/setup.bash
+   ```
 
 ### Adding New World Files
 
@@ -200,6 +293,34 @@ The embedded controller is at `controllers/corgi_ros2/corgi_ros2.py`. Key featur
 3. Update launch file if you want a dedicated launcher
 
 ## Troubleshooting
+
+### ModuleNotFoundError: No module named 'corgi_driver_pkg.corgi_driver'
+
+This error occurs when using `Corgi_launch.py` (external driver mode). To fix:
+
+1. **Verify the Python package exists**:
+   ```bash
+   ls ~/corgi_ws/corgi_ros2_ws/src/corgi_sim/corgi_driver_pkg/
+   # Should show: __init__.py, corgi_driver.py, Controller_TB.py
+   ```
+
+2. **Rebuild the package**:
+   ```bash
+   cd ~/corgi_ws/corgi_ros2_ws
+   colcon build --packages-select corgi_sim
+   source install/setup.bash
+   ```
+
+3. **Verify installation**:
+   ```bash
+   python3 -c "import corgi_driver_pkg.corgi_driver"
+   # Should complete without error
+   ```
+
+4. **If still failing**, use the embedded controller mode instead:
+   ```bash
+   ros2 launch corgi_sim run_simulation.launch.py
+   ```
 
 ### Webots doesn't start
 

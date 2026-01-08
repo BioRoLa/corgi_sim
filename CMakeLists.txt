@@ -5,6 +5,7 @@ project(corgi_sim LANGUAGES C CXX)
 # 1. Find required packages
 # ----------------------------------------------------------------------
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -92,8 +93,12 @@ install(DIRECTORY
   launch
   worlds
   controllers
+  protos
+  resource
   DESTINATION share/${PROJECT_NAME}
 )
+
+ament_python_install_package(corgi_driver_pkg)
 
 install(TARGETS
   corgi_sim_pos

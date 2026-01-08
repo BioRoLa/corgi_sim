@@ -3,7 +3,7 @@
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
-EXTERNPROTO "../protos/CorgiRobot_IFS.proto"
+EXTERNPROTO "../protos/CorgiRobot.proto"
 
 WorldInfo {
   basicTimeStep 1
@@ -11,11 +11,8 @@ WorldInfo {
   optimalThreadCount 4
 }
 Viewpoint {
-  orientation 0.13129230556852853 -0.20691862956712812 0.9695086442299324 1.158997094152603
-  position -1.0992056847752942 -3.1239550359205484 -0.17688152014088437
-}
-CorgiRobot_IFS {
-  name "CorgiRobot"
+  orientation 0.01459820666945291 -0.02325883791268491 0.9996228883038781 1.1211387746281087
+  position -1.0875308606951983 -3.6597514009292156 0.6088091200937155
 }
 TexturedBackground {
 }
@@ -36,4 +33,7 @@ Solid {
   boundingObject USE BOX
   physics Physics {
   }
+}
+CorgiRobot {
+  translation -0.02 0 0.19
 }

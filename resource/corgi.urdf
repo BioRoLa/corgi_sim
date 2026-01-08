@@ -1,6 +1,6 @@
 <?xml version="1.0" ?>
 <robot name="CorgiRobot">
     <webots>
-        <plugin type="controllers.corgi_ros2.corgi_driver.CorgiDriver" />
+        <plugin type="corgi_driver_pkg.corgi_driver.CorgiDriver" />
     </webots>
 </robot>

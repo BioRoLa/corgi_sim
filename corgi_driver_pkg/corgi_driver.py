@@ -11,16 +11,98 @@ from controller import Supervisor
 from rosgraph_msgs.msg import Clock
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import TransformStamped
+from geometry_msgs.msg import Quaternion
+from geometry_msgs.msg import Vector3
 from tf2_ros import TransformBroadcaster
 from corgi_msgs.msg import MotorCmdStamped
 from corgi_msgs.msg import TriggerStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
+from corgi_msgs.msg import ImuStamped
 
 from . import Controller_TB
 # -------------------------------------
 # Read_CSV = not False
 Read_CSV = False
 
+class imu:
+    def __init__(self, robot, node, basic_time_step=1):
+        """imu Group for Robots
+
+        Args:
+            robot (_type_): webots robot
+            node (_type_): ROS2 node
+            basic_time_step (int, optional): _description_. Defaults to 1.
+        """
+        # sensors: imu gyro ang_vel
+        
+        # Inertial Measurement Unit
+        # Accelerometer in Webots
+        # returns acceleration
+        try:
+            self.sensor_Accelerometer = robot.getDevice("imu")
+            self.sensor_Accelerometer.enable(basic_time_step)
+        except:
+            self.sensor_Accelerometer = None
+            print("No IMU Sensor Found")
+        
+        # Gyro Sensor
+        # Gyro in Webots
+        # returns angular velocity
+        try:
+            self.sensor_Gyro = robot.getDevice("ang_vel")
+            self.sensor_Gyro.enable(basic_time_step)
+        except:
+            self.sensor_Gyro = None
+            print("No Gyro Sensor Found")
+        
+        # Accelerometer Sensor
+        # InertialUnit in Webots
+        # returns quaternion
+        try:
+            self.sensor_InertialUnit = robot.getDevice("gyro")
+            self.sensor_InertialUnit.enable(basic_time_step)
+        except:
+            self.sensor_InertialUnit = None
+            print("No Accelerometer Sensor Found")
+        
+        # Node setup
+        self.__node = node
+        # imu publisher
+        self.imu_pub = node.create_publisher(
+            ImuStamped,
+            'imu',
+            1000
+        )
+        
+    def get_msg(self, time_stamp = Time(), seq = -1):
+        """
+        Get imu message
+        Args:
+            time_stamp (Time, optional): _description_. Defaults to Time().
+            seq (int, optional): _description_. Defaults to -1.
+        Returns:
+            imuStamped: _description_
+        """
+        # imustamp:
+        # Headers header: self-defined header
+        # geometry_msgs/Quaternion orientation
+        # geometry_msgs/Vector3 angular_velocity
+        # geometry_msgs/Vector3 linear_acceleration
+        
+        msg = ImuStamped()
+        msg.header.stamp = time_stamp
+        msg.header.seq = seq
+        
+        if self.sensor_InertialUnit:
+            quat = self.sensor_InertialUnit.getQuaternion()
+            msg.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
+        if self.sensor_Gyro:
+            gyro = self.sensor_Gyro.getValues()
+            msg.angular_velocity = Vector3(x=gyro[0], y=gyro[1], z=gyro[2])
+        if self.sensor_Accelerometer:
+            acc = self.sensor_Accelerometer.getValues()
+            msg.linear_acceleration = Vector3(x=acc[0], y=acc[1], z=acc[2])
+        return msg
 
 class LegManager:
     def __init__(self, robot, prefix, controller_tb, basic_time_step=1):
@@ -96,7 +178,7 @@ class LegManager:
     
 class CorgiDriver:
     def init(self, webots_node, properties):
-        # 1. 取得 Webots 機器人實例
+        # 1. 取得 Webots 機器人
         self.__robot = webots_node.robot
         self.__timestep = int(self.__robot.getBasicTimeStep())
         # [新增] 暫停旗標：確保只會自動暫停一次
@@ -130,7 +212,10 @@ class CorgiDriver:
             'D': LegManager(self.__robot, "D_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
                              basic_time_step=self.__timestep)
         }
+        # 4. 初始化 IMU
+        self.imu_sensor = imu(self.__robot, self.__node, basic_time_step=self.__timestep)
         
+        # 5. Motor Command Subscriber
         self.motor_sub = self.__node.create_subscription(
             MotorCmdStamped,
             'motor/command',
@@ -139,6 +224,8 @@ class CorgiDriver:
         )
         # ROS CMD Buffer from motor callback
         self.ROS_CMD_Buffer = []
+        
+        # ROS Control Mode Flag
         self.trigger_pub = self.__node.create_publisher(
             TriggerStamped,
             "trigger",
@@ -245,6 +332,13 @@ class CorgiDriver:
                 
                 self.tf_broadcaster.sendTransform(t)
     
+    def pub_imu(self):
+        time_stamp = Time()
+        time_stamp.sec = int(self.__robot.getTime())
+        time_stamp.nanosec = int((self.__robot.getTime() - int(self.__robot.getTime())) * 1e9)
+        imu_msg = self.imu_sensor.get_msg(time_stamp, self.current_index)
+        self.imu_sensor.imu_pub.publish(imu_msg)
+    
     def pub_clock(self):
         now = self.__robot.getTime()
         ros_time_msg = Time()
@@ -274,7 +368,8 @@ class CorgiDriver:
         self.pub_tf()
         # C. 發布 Motor State
         self.motor_state_publish()
-        
+        # D. 發布 IMU 資料
+        self.pub_imu()
         # ---------------------------------
         now = self.__robot.getTime()
         if Read_CSV:

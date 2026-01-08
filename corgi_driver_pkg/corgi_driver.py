@@ -155,14 +155,15 @@ class LegManager:
         for name, motor in self.motors.items():
             torques[self.prefix + name] = motor.getTorqueFeedback()
         return torques
-
+    
+    
     def get_states(self):
-        if self.prev_pos_l is None:
-            self.prev_pos_l = self.sensors["L_Motor"].getValue()
-        if self.prev_pos_r is None:
-            self.prev_pos_r = self.sensors["R_Motor"].getValue()
         pos_l = self.sensors["L_Motor"].getValue()
         pos_r = self.sensors["R_Motor"].getValue()
+        if self.prev_pos_l is None:
+            self.prev_pos_l = pos_l
+        if self.prev_pos_r is None:
+            self.prev_pos_r = pos_r
         vel_l = (pos_l - self.prev_pos_l) / self.basic_time_step * 1000.0
         vel_r = (pos_r - self.prev_pos_r) / self.basic_time_step * 1000.0
         self.prev_pos_l = pos_l

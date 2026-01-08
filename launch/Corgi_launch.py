@@ -28,7 +28,8 @@ def generate_launch_description():
             {
                 'robot_description': os.path.join(package_dir, 'resource', 'corgi.urdf')
             }
-        ]
+        ],
+        respawn=True    #maintain connection if Webots restarts
     )
 
     return LaunchDescription([

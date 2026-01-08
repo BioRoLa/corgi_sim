@@ -1,0 +1,39 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "../protos/CorgiRobot_IFS.proto"
+
+WorldInfo {
+  basicTimeStep 1
+  FPS 24
+  optimalThreadCount 4
+}
+Viewpoint {
+  orientation 0.13129230556852853 -0.20691862956712812 0.9695086442299324 1.158997094152603
+  position -1.0992056847752942 -3.1239550359205484 -0.17688152014088437
+}
+CorgiRobot_IFS {
+  name "CorgiRobot"
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 10 10
+}
+Solid {
+  translation 0 0 0.05
+  children [
+    DEF BOX Shape {
+      geometry Box {
+        size 0.4 0.1 0.1
+      }
+    }
+  ]
+  boundingObject USE BOX
+  physics Physics {
+  }
+}

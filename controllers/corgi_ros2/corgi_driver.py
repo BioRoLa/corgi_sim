@@ -1,0 +1,314 @@
+import rclpy
+import math
+import csv
+import os
+from ament_index_python.packages import get_package_share_directory
+
+# --- Webots 控制器模組 (用於控制模擬狀態) ---
+from controller import Supervisor
+
+# --- [新增] Supervisor 與 TF 相關模組 ---
+from rosgraph_msgs.msg import Clock
+from builtin_interfaces.msg import Time
+from geometry_msgs.msg import TransformStamped
+from tf2_ros import TransformBroadcaster
+from corgi_msgs.msg import MotorCmdStamped
+from corgi_msgs.msg import TriggerStamped
+from corgi_msgs.msg import MotorStateStamped, MotorState
+
+from . import Controller_TB
+# -------------------------------------
+# Read_CSV = not False
+Read_CSV = False
+
+
+class LegManager:
+    def __init__(self, robot, prefix, controller_tb, basic_time_step=1):
+        self.prefix = prefix
+        self.motors = {}
+        self.sensors = {}
+        self.tb = controller_tb
+        motor_names = ["L_Motor", "R_Motor"]
+        self.prev_pos_l = None
+        self.prev_pos_r = None
+        self.basic_time_step = basic_time_step
+        for name in motor_names:
+            full_name = prefix + name
+            sensor_full_name = full_name + "_sensor"
+            sensor = robot.getDevice(sensor_full_name)
+            if sensor:
+                self.sensors[name] = sensor
+                sensor.enable(self.basic_time_step)
+            motor = robot.getDevice(full_name)
+            if motor:
+                self.motors[name] = motor
+                motor.setPosition(float('inf')) 
+                motor.setVelocity(0.0)
+                motor.enableTorqueFeedback(self.basic_time_step)
+
+    def set_target(self, theta, beta):
+        if theta < math.radians(17): theta = math.radians(17)
+        cmd_L, cmd_R = self.tb.IK(theta, beta)
+        if "L_Motor" in self.motors:
+            self.motors["L_Motor"].setPosition(cmd_L)
+            self.motors["L_Motor"].setVelocity(5.0) 
+        if "R_Motor" in self.motors:
+            self.motors["R_Motor"].setPosition(cmd_R)
+            self.motors["R_Motor"].setVelocity(5.0)
+    
+    def get_positions(self):
+        positions = {}
+        for name, sensor in self.sensors.items():
+            positions[self.prefix + name] = sensor.getValue()
+        return positions
+    
+    def get_velocities(self):
+        velocities = {}
+        for name, motor in self.motors.items():
+            velocities[self.prefix + name] = motor.getVelocity()
+        return velocities
+    
+    def get_torques(self):
+        torques = {}
+        for name, motor in self.motors.items():
+            torques[self.prefix + name] = motor.getTorqueFeedback()
+        return torques
+
+    def get_states(self):
+        if self.prev_pos_l is None:
+            self.prev_pos_l = self.sensors["L_Motor"].getValue()
+        if self.prev_pos_r is None:
+            self.prev_pos_r = self.sensors["R_Motor"].getValue()
+        pos_l = self.sensors["L_Motor"].getValue()
+        pos_r = self.sensors["R_Motor"].getValue()
+        vel_l = (pos_l - self.prev_pos_l) / self.basic_time_step * 1000.0
+        vel_r = (pos_r - self.prev_pos_r) / self.basic_time_step * 1000.0
+        self.prev_pos_l = pos_l
+        self.prev_pos_r = pos_r
+        msg = MotorState()
+        theta, beta = self.tb.FK(pos_l,pos_r)
+        msg.theta , msg.beta = theta, beta
+        msg.velocity_r = vel_r
+        msg.velocity_l = vel_l
+        msg.torque_r = self.motors["R_Motor"].getTorqueFeedback()
+        msg.torque_l = self.motors["L_Motor"].getTorqueFeedback()
+        return msg
+    
+class CorgiDriver:
+    def init(self, webots_node, properties):
+        # 1. 取得 Webots 機器人實例
+        self.__robot = webots_node.robot
+        self.__timestep = int(self.__robot.getBasicTimeStep())
+        # [新增] 暫停旗標：確保只會自動暫停一次
+        self.has_paused = False
+        # 2. 初始化 ROS 2 並建立我們自己的 Node
+        # 先檢查是否已經 init 過，避免重複報錯
+        if not rclpy.ok():
+            rclpy.init(args=None)
+            
+        # 建立名為 corgi_driver 的節點
+        self.__node = rclpy.create_node('corgi_driver_internal')
+        
+        # 取得自己在 Webots 中的節點 (需要 World 裡 supervisor=TRUE)
+        self.__self_node = self.__robot.getSelf()
+        
+        # 建立 /clock 發布器
+        self.clock_pub = self.__node.create_publisher(Clock, 'clock', 1000)
+        
+        # 建立 TF 廣播器 (讓 Rviz 知道機器人在哪)
+        self.tf_broadcaster = TransformBroadcaster(self.__node) 
+        
+        # 3. 初始化運動學
+        self.tb_lib = Controller_TB.Controller_TB(theta_0=math.radians(17))
+        self.legs = {
+            'A': LegManager(self.__robot, "A_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
+                             basic_time_step=self.__timestep),
+            'B': LegManager(self.__robot, "B_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
+                             basic_time_step=self.__timestep),
+            'C': LegManager(self.__robot, "C_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
+                             basic_time_step=self.__timestep),
+            'D': LegManager(self.__robot, "D_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
+                             basic_time_step=self.__timestep)
+        }
+        
+        self.motor_sub = self.__node.create_subscription(
+            MotorCmdStamped,
+            'motor/command',
+            self.motor_callback,
+            1000
+        )
+        # ROS CMD Buffer from motor callback
+        self.ROS_CMD_Buffer = []
+        self.trigger_pub = self.__node.create_publisher(
+            TriggerStamped,
+            "trigger",
+            1000
+        )
+        self.trigger_msg = TriggerStamped()
+        # motor state publisher
+        self.motor_state_pub = self.__node.create_publisher(
+            MotorStateStamped,
+            'motor/state',
+            1000
+        )
+        
+        
+        if Read_CSV:
+            # 4. 讀取 CSV
+            self.trajectory_data = []
+            self.current_index = 0
+            try:
+                pkg_path = get_package_share_directory('corgi_ros_control')
+                csv_path = os.path.join(pkg_path, 'resource', 'COT_Exp_Index_140_OLD.csv')
+                
+                # 使用我們自己的 node logger，現在這行不會報錯了！
+                self.__node.get_logger().info(f"Loading CSV: {csv_path}")
+                
+                with open(csv_path, 'r') as file:
+                    reader = csv.reader(file)
+                    for row in reader:
+                        try:
+                            self.trajectory_data.append([float(val) for val in row])
+                        except ValueError: continue
+                self.__node.get_logger().info(f"✅ CSV Loaded: {len(self.trajectory_data)} rows")
+            except Exception as e:
+                self.__node.get_logger().error(f"❌ CSV Error: {str(e)}")
+        else:       #ROS Control Mode
+            self.__node.get_logger().info("⚠️ CSV Reading Disabled")
+            # public trigger message enable = True
+            self.trigger_msg.enable = True
+            self.trigger_pub.publish(self.trigger_msg)
+            self.current_index = 0
+        self.__node.get_logger().info("🚀 Driver Initialized! Waiting for Play button...")
+        
+    # 4. [新增] Motor Command 回調
+    def motor_callback(self, msg):
+        """
+        當收到 C++ 發來的 MotorCmdStamped 時觸發
+        """
+        self.ros_control_active = True # 標記：開始使用 ROS 控制
+        
+        # 1. 解析訊息
+        CMDS = {"A_Theta":msg.module_a.theta, "A_Beta":msg.module_a.beta,
+                "B_Theta":msg.module_b.theta, "B_Beta":msg.module_b.beta,
+                "C_Theta":msg.module_c.theta, "C_Beta":msg.module_c.beta,
+                "D_Theta":msg.module_d.theta, "D_Beta":msg.module_d.beta}
+        # Add to ROS CMD Buffer
+        self.ROS_CMD_Buffer += [CMDS.copy()]
+        
+    def execute(self):
+        if self.current_index < len(self.ROS_CMD_Buffer):
+            cmd = self.ROS_CMD_Buffer[self.current_index]
+            # 處理腳位目標
+            self.legs['A'].set_target(cmd["A_Theta"], -cmd["A_Beta"])
+            self.legs['B'].set_target(cmd["B_Theta"], -cmd["B_Beta"])
+            self.legs['C'].set_target(cmd["C_Theta"], -cmd["C_Beta"])
+            self.legs['D'].set_target(cmd["D_Theta"], -cmd["D_Beta"])
+            
+            # 修正後的 Logger：外層改用單引號，避免與 cmd["Key"] 衝突
+            self.__node.get_logger().info(''.join([
+                f'\nReceived CMD: A({cmd["A_Theta"]:.5f}, {cmd["A_Beta"]:.2f})\n',
+                f'Received CMD: B({cmd["B_Theta"]:.5f}, {cmd["B_Beta"]:.2f})\n',
+                f'Received CMD: C({cmd["C_Theta"]:.5f}, {cmd["C_Beta"]:.2f})\n',
+                f'Received CMD: D({cmd["D_Theta"]:.5f}, {cmd["D_Beta"]:.2f})\n'
+            ]))
+            self.current_index += 1
+    
+    def pub_tf(self):
+        # B. 發布 TF (完美的里程計)
+        if self.__self_node:
+            # 取得絕對位置 (X, Y, Z)
+            pos = self.__self_node.getPosition()
+            # 取得旋轉 (Axis-Angle: [x, y, z, angle])
+            rot_field = self.__self_node.getField("rotation")
+            if rot_field:
+                rot = rot_field.getSFRotation()
+                # 將 Axis-Angle 轉換為 Quaternion (x, y, z, w)
+                half_angle = rot[3] / 2
+                sin_half = math.sin(half_angle)
+                
+                t = TransformStamped()
+                ros_time_msg = Time()
+                t.header.stamp = ros_time_msg
+                t.header.frame_id = "odom"       # 父座標 (世界)
+                t.child_frame_id = "base_link"   # 子座標 (機器人本體)
+                
+                t.transform.translation.x = pos[0]
+                t.transform.translation.y = pos[1]
+                t.transform.translation.z = pos[2]
+                
+                # 計算四元數
+                t.transform.rotation.x = rot[0] * sin_half
+                t.transform.rotation.y = rot[1] * sin_half
+                t.transform.rotation.z = rot[2] * sin_half
+                t.transform.rotation.w = math.cos(half_angle)
+                
+                self.tf_broadcaster.sendTransform(t)
+    
+    def pub_clock(self):
+        now = self.__robot.getTime()
+        ros_time_msg = Time()
+        ros_time_msg.sec = int(now) 
+        ros_time_msg.nanosec = int((now - int(now)) * 1e9)
+        self.clock_pub.publish(Clock(clock=ros_time_msg))
+    
+    def motor_state_publish(self):
+        motor_state_msg = MotorStateStamped()
+        motor_state_msg.header.seq = self.current_index
+        # 取得所有馬達狀態
+        motor_state_msg.module_a = self.legs['A'].get_states()
+        motor_state_msg.module_b = self.legs['B'].get_states()
+        motor_state_msg.module_c = self.legs['C'].get_states()
+        motor_state_msg.module_d = self.legs['D'].get_states()
+        self.motor_state_pub.publish(motor_state_msg)
+    
+    # 5. [回歸標準] 使用 step 回調
+    # Webots 外部驅動程式會不斷呼叫這個函式
+    def step(self):
+        # 讓 ROS 2 處理通訊 (這會讓 Logger 和 Topic 有作用)
+        rclpy.spin_once(self.__node, timeout_sec=0)
+        
+        # A. 發布模擬時間 /clock
+        self.pub_clock()
+        # B. 發布 TF
+        self.pub_tf()
+        # C. 發布 Motor State
+        self.motor_state_publish()
+        
+        # ---------------------------------
+        now = self.__robot.getTime()
+        if Read_CSV:
+            # 如果時間超過 5 秒，且「之前還沒暫停過」
+            if now >= 5.0 and not self.has_paused:
+                self.__node.get_logger().warn("⏸️ Time is up (5s)! Pausing Simulation...")
+                
+                # 設定模擬模式為 PAUSE (暫停)
+                self.__robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
+                
+                # [重要] 標記為已暫停，這樣當您手動按 Play 繼續時，才不會又卡住
+                self.has_paused = True
+            # ---------------------------------
+            # 存活確認 Log (每 1 秒印一次)
+            # 如果這一行有印出來，代表「程式在跑」
+            if int(now * 1000) % 1000 == 0:
+                self.__node.get_logger().info(f"🟢 Running... Time: {now:.2f}s | Idx: {self.current_index}")
+            # 播放 CSV
+            if self.current_index < len(self.trajectory_data):
+                row = self.trajectory_data[self.current_index]
+                self.legs['A'].set_target(row[0], -row[1])
+                self.legs['B'].set_target(row[2], -row[3])
+                self.legs['C'].set_target(row[4], -row[5])
+                self.legs['D'].set_target(row[6], -row[7])
+                self.__node.get_logger().info("".join([ f"\nReceived CMD: A( {row[0]:.5f}, {row[1]:.2f})\n",
+                                                        f"Received CMD: B( {row[2]:.5f}, {row[3]:.2f})\n",
+                                                        f"Received CMD: C( {row[4]:.5f}, {row[5]:.2f})\n",
+                                                        f"Received CMD: D( {row[6]:.5f}, {row[7]:.2f})\n"]))
+                self.current_index += 1
+        else:
+            self.execute()
+            # if self.ROS_CMD_Buffer:
+            #     self.execute()
+            # public trigger message enable = True
+            self.trigger_pub.publish(self.trigger_msg)
+    # def step(self):
+    #     rclpy.spin_once(self.__node, timeout_sec=0)

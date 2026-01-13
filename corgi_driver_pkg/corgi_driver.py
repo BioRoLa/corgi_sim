@@ -159,6 +159,7 @@ class LegManager:
         # 讀取當前馬達狀態
         pos_r = self.sensors["R_Motor"].getValue()
         pos_l = self.sensors["L_Motor"].getValue()
+        alpha = 0.1  # 低通濾波係數
         
         # 初始化前一時刻的位置
         if self.prev_pos_r is None:
@@ -170,7 +171,9 @@ class LegManager:
         dt = self.basic_time_step / 1000.0  # 轉換為秒
         vel_r = (pos_r - self.prev_pos_r) / dt
         vel_l = (pos_l - self.prev_pos_l) / dt
-        
+        # 速度低通濾波
+        vel_r = alpha * vel_r + (1 - alpha) * self.prev_vel_r
+        vel_l = alpha * vel_l + (1 - alpha) * self.prev_vel_l
         # 更新歷史位置
         self.prev_pos_r = pos_r
         self.prev_pos_l = pos_l
@@ -183,8 +186,8 @@ class LegManager:
         
         # === ROS1 corgi_sim_trq.cpp Line 115-116 控制律 ===
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
-        trq_r = kp_r * (cmd_R - pos_r) + kd_r * (-vel_r) + torque_r
-        trq_l = kp_l * (cmd_L - pos_l) + kd_l * (-vel_l) + torque_l
+        trq_r = kp_r * (cmd_R - pos_r) + kd_r * (-vel_r) + torque_r * 1 if (cmd_R - pos_r) else -1
+        trq_l = kp_l * (cmd_L - pos_l) + kd_l * (-vel_l) + torque_l * 1 if (cmd_L - pos_l) else -1
         
         # 設定扭矩到 Webots 馬達
         if "R_Motor" in self.motors:

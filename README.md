@@ -103,7 +103,7 @@ This will:
 In a separate terminal:
 
 ```bash
-source ~/corgi_ws/corgi_ros_ws/install/setup.bash
+source ~/corgi_ws/corgi_ros2_ws/install/setup.bash
 
 # Play a pre-recorded CSV trajectory
 ros2 run corgi_csv_control corgi_csv_control  demo_transform_sim --ros-args -p use_sim_time:=True

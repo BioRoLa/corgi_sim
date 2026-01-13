@@ -131,14 +131,12 @@ class LegManager:
                 motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
                 motor.setVelocity(0.0)           # 初始速度為 0
                 motor.enableTorqueFeedback(self.basic_time_step)
-                try:
-                    motor.setAvailableTorque(0.0)
-                except:
-                    pass
+                max_torque = motor.getMaxTorque()
+                motor.setAvailableTorque(max_torque)
 
     def set_target(self, theta, beta, kp_r=0.0, kp_l=0.0, kd_r=0.0, kd_l=0.0, torque_r=0.0, torque_l=0.0):
         """
-        設定腿部目標 - 純扭矩控制（參考 ROS1 corgi_sim_trq.cpp）
+        設定腿部目標 - 純扭矩控制
         
         Args:
             theta: 腿部伸展角 (rad)
@@ -147,7 +145,7 @@ class LegManager:
             kd_r, kd_l: 速度阻尼增益
             torque_r, torque_l: 前饋扭矩 (N·m)
         
-        控制律 (與 ROS1 相同):
+        控制律:
             τ = kp × (φ_desired - φ_actual) + kd × (-φ̇_actual) + τ_feedforward
         """
         # 限制最小角度
@@ -289,6 +287,15 @@ class CorgiDriver:
         # ROS CMD Buffer from motor callback
         self.ROS_CMD_Buffer = []
         
+        # Fixed PID parameters (not using ROS2 parameter)
+        self.KP = 40.0
+        self.KI = 0.0
+        self.KD = 1.0
+        
+        # Default position when no message received
+        self.default_theta = 0.0
+        self.default_beta = 0.0
+        
         # ROS Control Mode Flag
         self.trigger_pub = self.__node.create_publisher(
             TriggerStamped,
@@ -383,40 +390,66 @@ class CorgiDriver:
     def execute(self):
         if self.current_index < len(self.ROS_CMD_Buffer):
             cmd = self.ROS_CMD_Buffer[self.current_index]
-            # 處理四腿目標（支援扭矩控制參數）
+            # 處理四腿目標（使用固定 PID 參數）
             self.legs['A'].set_target(
                 cmd["A_Theta"], -cmd["A_Beta"],
-                cmd["A_kp_r"], cmd["A_kp_l"],
-                cmd["A_kd_r"], cmd["A_kd_l"],
+                self.KP, self.KP,
+                self.KD, self.KD,
                 cmd["A_torque_r"], cmd["A_torque_l"]
             )
             self.legs['B'].set_target(
                 cmd["B_Theta"], -cmd["B_Beta"],
-                cmd["B_kp_r"], cmd["B_kp_l"],
-                cmd["B_kd_r"], cmd["B_kd_l"],
+                self.KP, self.KP,
+                self.KD, self.KD,
                 cmd["B_torque_r"], cmd["B_torque_l"]
             )
             self.legs['C'].set_target(
                 cmd["C_Theta"], -cmd["C_Beta"],
-                cmd["C_kp_r"], cmd["C_kp_l"],
-                cmd["C_kd_r"], cmd["C_kd_l"],
+                self.KP, self.KP,
+                self.KD, self.KD,
                 cmd["C_torque_r"], cmd["C_torque_l"]
             )
             self.legs['D'].set_target(
                 cmd["D_Theta"], -cmd["D_Beta"],
-                cmd["D_kp_r"], cmd["D_kp_l"],
-                cmd["D_kd_r"], cmd["D_kd_l"],
+                self.KP, self.KP,
+                self.KD, self.KD,
                 cmd["D_torque_r"], cmd["D_torque_l"]
             )
             
-            # 顯示扭矩控制參數
+            # 顯示扭矩控制參數（使用固定 PID 值）
             self.__node.get_logger().info(
                 f'[TORQUE] A: θ={cmd["A_Theta"]:.3f}, β={cmd["A_Beta"]:.3f}, '
-                f'kp={cmd["A_kp_r"]:.1f}, kd={cmd["A_kd_r"]:.2f}, '
+                f'kp={self.KP:.1f}, kd={self.KD:.2f}, '
                 f'τ={cmd["A_torque_r"]:.3f}'
             )
             
             self.current_index += 1
+        else:
+            # 未收到訊息時使用預設位置 theta=0, beta=0
+            self.legs['A'].set_target(
+                self.default_theta, self.default_beta,
+                self.KP, self.KP,
+                self.KD, self.KD,
+                0.0, 0.0
+            )
+            self.legs['B'].set_target(
+                self.default_theta, self.default_beta,
+                self.KP, self.KP,
+                self.KD, self.KD,
+                0.0, 0.0
+            )
+            self.legs['C'].set_target(
+                self.default_theta, self.default_beta,
+                self.KP, self.KP,
+                self.KD, self.KD,
+                0.0, 0.0
+            )
+            self.legs['D'].set_target(
+                self.default_theta, self.default_beta,
+                self.KP, self.KP,
+                self.KD, self.KD,
+                0.0, 0.0
+            )
     
     def pub_tf(self):
         # B. 發布 TF (完美的里程計)

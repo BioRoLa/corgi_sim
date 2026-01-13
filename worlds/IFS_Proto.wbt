@@ -22,11 +22,11 @@ RectangleArena {
   floorSize 10 10
 }
 Solid {
-  translation 0 0 0.05
+  translation 0 0 0.15
   children [
     DEF BOX Shape {
       geometry Box {
-        size 0.4 0.1 0.1
+        size 0.4 0.1 0.3
       }
     }
   ]
@@ -35,5 +35,5 @@ Solid {
   }
 }
 CorgiRobot {
-  translation -0.02 0 0.19
+  translation -0.02 0 0.391
 }

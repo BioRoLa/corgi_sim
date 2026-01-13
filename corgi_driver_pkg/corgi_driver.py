@@ -105,7 +105,7 @@ class imu:
         return msg
 
 class LegManager:
-    def __init__(self, robot, prefix, controller_tb, basic_time_step=1):
+    def __init__(self, robot, prefix, controller_tb, basic_time_step=1, Max_Torque=35):
         self.prefix = prefix
         self.motors = {}
         self.sensors = {}
@@ -116,6 +116,7 @@ class LegManager:
         self.prev_vel_l = 0.0
         self.prev_vel_r = 0.0
         self.basic_time_step = basic_time_step
+        self.Max_Torque = Max_Torque
         
         for name in motor_names:
             full_name = prefix + name
@@ -131,8 +132,7 @@ class LegManager:
                 motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
                 motor.setVelocity(0.0)           # 初始速度為 0
                 motor.enableTorqueFeedback(self.basic_time_step)
-                max_torque = motor.getMaxTorque()
-                motor.setAvailableTorque(max_torque)
+                motor.setAvailableTorque(self.Max_Torque)
 
     def set_target(self, theta, beta, kp_r=0.0, kp_l=0.0, kd_r=0.0, kd_l=0.0, torque_r=0.0, torque_l=0.0):
         """
@@ -188,8 +188,16 @@ class LegManager:
         
         # 設定扭矩到 Webots 馬達
         if "R_Motor" in self.motors:
+            if trq_r > self.Max_Torque:
+                trq_r = self.Max_Torque
+            elif trq_r < -self.Max_Torque:
+                trq_r = -self.Max_Torque
             self.motors["R_Motor"].setTorque(trq_r)
         if "L_Motor" in self.motors:
+            if trq_l > self.Max_Torque:
+                trq_l = self.Max_Torque
+            elif trq_l < -self.Max_Torque:
+                trq_l = -self.Max_Torque
             self.motors["L_Motor"].setTorque(trq_l)
     
     def _find_closest_phi(self, phi_target, phi_current):
@@ -262,17 +270,26 @@ class CorgiDriver:
         # 建立 TF 廣播器 (讓 Rviz 知道機器人在哪)
         self.tf_broadcaster = TransformBroadcaster(self.__node) 
         
+        # Fixed PID parameters (not using ROS2 parameter)
+        # TUNED Params
+        self.KP = 1000
+        self.KI = 0.0
+        self.KD = 1
+        # self.Max_Torque = self.KP if self.KP > 35.0 else 35.0
+        self.Max_Torque = 35.0
+        self.trq_feedforward = 0  # N·m 前饋扭矩
+        
         # 3. 初始化運動學
         self.tb_lib = Controller_TB.Controller_TB(theta_0=math.radians(17))
         self.legs = {
             'A': LegManager(self.__robot, "A_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep),
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque),
             'B': LegManager(self.__robot, "B_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep),
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque),
             'C': LegManager(self.__robot, "C_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep),
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque),
             'D': LegManager(self.__robot, "D_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep)
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque)
         }
         # 4. 初始化 IMU
         self.imu_sensor = imu(self.__robot, self.__node, basic_time_step=self.__timestep)
@@ -287,10 +304,6 @@ class CorgiDriver:
         # ROS CMD Buffer from motor callback
         self.ROS_CMD_Buffer = []
         
-        # Fixed PID parameters (not using ROS2 parameter)
-        self.KP = 40.0
-        self.KI = 0.0
-        self.KD = 1.0
         
         # Default position when no message received
         self.default_theta = 0.0

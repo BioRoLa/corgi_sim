@@ -202,7 +202,12 @@ class LegManager:
             elif trq_l < -self.Max_Torque:
                 trq_l = -self.Max_Torque
             self.motors["L_Motor"].setTorque(trq_l)
-    
+            # self.__node.get_logger().info(f"[{self.prefix}] Set L_Motor Torque: {trq_l:.3f} Nm")
+        # print debug info
+        return "".join([f"[{self.prefix}] Target θ: {theta:.3f} rad, β: {beta:.3f} rad | ",
+                                      f"Cmd L: {cmd_L:.3f} rad, R: {cmd_R:.3f} rad | ",
+                                      f"Pos L: {pos_l:.3f} rad, R: {pos_r:.3f} rad | ",
+                                      f"Trq L: {trq_l:.3f} Nm, R: {trq_r:.3f} Nm"])
     def _find_closest_phi(self, phi_target, phi_current):
         """
         找到最接近的等價角度（處理 2π 週期性）
@@ -404,42 +409,82 @@ class CorgiDriver:
         self.ROS_CMD_Buffer += [CMDS.copy()]
         
     def execute(self):
+        
         if self.current_index < len(self.ROS_CMD_Buffer):
             cmd = self.ROS_CMD_Buffer[self.current_index]
             # 處理四腿目標（使用固定 PID 參數）
-            self.legs['A'].set_target(
+            debug_info = "\n"
+            debug_info += self.legs['A'].set_target(
+                cmd["A_Theta"], -cmd["A_Beta"],
+                self.KP, self.KP,
+                self.KD, self.KD,
+                cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
+            )
+            debug_info += "\n"
+            debug_info += self.legs['B'].set_target(
+                cmd["B_Theta"], -cmd["B_Beta"],
+                self.KP, self.KP,
+                self.KD, self.KD,
+                cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
+            )
+            debug_info += "\n"
+            debug_info += self.legs['C'].set_target(
+                cmd["C_Theta"], -cmd["C_Beta"],
+                self.KP, self.KP,
+                self.KD, self.KD,
+                cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
+            )
+            debug_info += "\n"
+            debug_info += self.legs['D'].set_target(
+                cmd["D_Theta"], -cmd["D_Beta"],
+                self.KP, self.KP,
+                self.KD, self.KD,
+                cmd["D_torque_r"] + self.trq_feedforward, cmd["D_torque_l"] + self.trq_feedforward
+            )
+            
+            # 顯示扭矩控制參數（使用固定 PID 值）
+            self.__node.get_logger().info(
+                debug_info
+            )
+            
+            self.current_index += 1
+            
+        elif self.current_index == len(self.ROS_CMD_Buffer) and self.current_index:
+            # keep the last command
+            cmd = self.ROS_CMD_Buffer[self.current_index - 1]
+            debug_info = "\n"
+            debug_info += self.legs['A'].set_target(
                 cmd["A_Theta"], -cmd["A_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["A_torque_r"], cmd["A_torque_l"]
             )
-            self.legs['B'].set_target(
+            debug_info += "\n"
+            debug_info += self.legs['B'].set_target(
                 cmd["B_Theta"], -cmd["B_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["B_torque_r"], cmd["B_torque_l"]
             )
-            self.legs['C'].set_target(
+            debug_info += "\n"
+            debug_info += self.legs['C'].set_target(
                 cmd["C_Theta"], -cmd["C_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["C_torque_r"], cmd["C_torque_l"]
             )
-            self.legs['D'].set_target(
+            debug_info += "\n"
+            debug_info += self.legs['D'].set_target(
                 cmd["D_Theta"], -cmd["D_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["D_torque_r"], cmd["D_torque_l"]
             )
             
-            # 顯示扭矩控制參數（使用固定 PID 值）
             self.__node.get_logger().info(
-                f'[TORQUE] A: θ={cmd["A_Theta"]:.3f}, β={cmd["A_Beta"]:.3f}, '
-                f'kp={self.KP:.1f}, kd={self.KD:.2f}, '
-                f'τ={cmd["A_torque_r"]:.3f}'
+                debug_info
             )
             
-            self.current_index += 1
         else:
             # 未收到訊息時使用預設位置 theta=0, beta=0
             self.legs['A'].set_target(

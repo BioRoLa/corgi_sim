@@ -11,8 +11,8 @@ WorldInfo {
   optimalThreadCount 4
 }
 Viewpoint {
-  orientation 0.01459820666945291 -0.02325883791268491 0.9996228883038781 1.1211387746281087
-  position -1.0875308606951983 -3.6597514009292156 0.6088091200937155
+  orientation -0.2166769342239971 0.370004428779659 0.9034090041939631 1.1502565454646942
+  position -1.35706370048436 -3.217058412053156 1.88260450377176
 }
 TexturedBackground {
 }
@@ -22,11 +22,11 @@ RectangleArena {
   floorSize 10 10
 }
 Solid {
-  translation 0 0 0.15
+  translation 0 0 0.05
   children [
     DEF BOX Shape {
       geometry Box {
-        size 0.4 0.1 0.3
+        size 0.4 0.1 0.1
       }
     }
   ]
@@ -35,5 +35,5 @@ Solid {
   }
 }
 CorgiRobot {
-  translation -0.02 0 0.391
+  translation -0.02 0 0.191
 }

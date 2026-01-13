@@ -113,7 +113,10 @@ class LegManager:
         motor_names = ["L_Motor", "R_Motor"]
         self.prev_pos_l = None
         self.prev_pos_r = None
+        self.prev_vel_l = 0.0
+        self.prev_vel_r = 0.0
         self.basic_time_step = basic_time_step
+        
         for name in motor_names:
             full_name = prefix + name
             sensor_full_name = full_name + "_sensor"
@@ -124,19 +127,79 @@ class LegManager:
             motor = robot.getDevice(full_name)
             if motor:
                 self.motors[name] = motor
-                motor.setPosition(float('inf')) 
-                motor.setVelocity(0.0)
+                # 設定為扭矩控制模式
+                motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
+                motor.setVelocity(0.0)           # 初始速度為 0
                 motor.enableTorqueFeedback(self.basic_time_step)
+                try:
+                    motor.setAvailableTorque(0.0)
+                except:
+                    pass
 
-    def set_target(self, theta, beta):
-        if theta < math.radians(17): theta = math.radians(17)
+    def set_target(self, theta, beta, kp_r=0.0, kp_l=0.0, kd_r=0.0, kd_l=0.0, torque_r=0.0, torque_l=0.0):
+        """
+        設定腿部目標 - 純扭矩控制（參考 ROS1 corgi_sim_trq.cpp）
+        
+        Args:
+            theta: 腿部伸展角 (rad)
+            beta: 腿部旋轉角 (rad)
+            kp_r, kp_l: 位置比例增益
+            kd_r, kd_l: 速度阻尼增益
+            torque_r, torque_l: 前饋扭矩 (N·m)
+        
+        控制律 (與 ROS1 相同):
+            τ = kp × (φ_desired - φ_actual) + kd × (-φ̇_actual) + τ_feedforward
+        """
+        # 限制最小角度
+        theta_0 = math.radians(17)
+        if theta < theta_0:
+            theta = theta_0
+        
+        # 計算目標馬達角度 (IK)
         cmd_L, cmd_R = self.tb.IK(theta, beta)
-        if "L_Motor" in self.motors:
-            self.motors["L_Motor"].setPosition(cmd_L)
-            self.motors["L_Motor"].setVelocity(5.0) 
+        
+        # 讀取當前馬達狀態
+        pos_r = self.sensors["R_Motor"].getValue()
+        pos_l = self.sensors["L_Motor"].getValue()
+        
+        # 初始化前一時刻的位置
+        if self.prev_pos_r is None:
+            self.prev_pos_r = pos_r
+        if self.prev_pos_l is None:
+            self.prev_pos_l = pos_l
+        
+        # 計算速度 (rad/s) - 使用數值微分
+        dt = self.basic_time_step / 1000.0  # 轉換為秒
+        vel_r = (pos_r - self.prev_pos_r) / dt
+        vel_l = (pos_l - self.prev_pos_l) / dt
+        
+        # 更新歷史位置
+        self.prev_pos_r = pos_r
+        self.prev_pos_l = pos_l
+        self.prev_vel_r = vel_r
+        self.prev_vel_l = vel_l
+        
+        # 處理角度連續性（避免 ±π 跳變）
+        cmd_R = self._find_closest_phi(cmd_R, pos_r)
+        cmd_L = self._find_closest_phi(cmd_L, pos_l)
+        
+        # === ROS1 corgi_sim_trq.cpp Line 115-116 控制律 ===
+        # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
+        trq_r = kp_r * (cmd_R - pos_r) + kd_r * (-vel_r) + torque_r
+        trq_l = kp_l * (cmd_L - pos_l) + kd_l * (-vel_l) + torque_l
+        
+        # 設定扭矩到 Webots 馬達
         if "R_Motor" in self.motors:
-            self.motors["R_Motor"].setPosition(cmd_R)
-            self.motors["R_Motor"].setVelocity(5.0)
+            self.motors["R_Motor"].setTorque(trq_r)
+        if "L_Motor" in self.motors:
+            self.motors["L_Motor"].setTorque(trq_l)
+    
+    def _find_closest_phi(self, phi_target, phi_current):
+        """
+        找到最接近的等價角度（處理 2π 週期性）
+        """
+        diff = (phi_target - phi_current + math.pi) % (2 * math.pi) - math.pi
+        return phi_current + diff
     
     def get_positions(self):
         positions = {}
@@ -276,30 +339,83 @@ class CorgiDriver:
         """
         self.ros_control_active = True # 標記：開始使用 ROS 控制
         
-        # 1. 解析訊息
-        CMDS = {"A_Theta":msg.module_a.theta, "A_Beta":msg.module_a.beta,
-                "B_Theta":msg.module_b.theta, "B_Beta":msg.module_b.beta,
-                "C_Theta":msg.module_c.theta, "C_Beta":msg.module_c.beta,
-                "D_Theta":msg.module_d.theta, "D_Beta":msg.module_d.beta}
+        # 1. 解析訊息（包含 PD 增益和前饋扭矩）
+        CMDS = {
+            "A_Theta": msg.module_a.theta, 
+            "A_Beta": msg.module_a.beta,
+            "A_kp_r": msg.module_a.kp_r,
+            "A_kp_l": msg.module_a.kp_l,
+            "A_kd_r": msg.module_a.kd_r,
+            "A_kd_l": msg.module_a.kd_l,
+            "A_torque_r": msg.module_a.torque_r,
+            "A_torque_l": msg.module_a.torque_l,
+            
+            "B_Theta": msg.module_b.theta, 
+            "B_Beta": msg.module_b.beta,
+            "B_kp_r": msg.module_b.kp_r,
+            "B_kp_l": msg.module_b.kp_l,
+            "B_kd_r": msg.module_b.kd_r,
+            "B_kd_l": msg.module_b.kd_l,
+            "B_torque_r": msg.module_b.torque_r,
+            "B_torque_l": msg.module_b.torque_l,
+            
+            "C_Theta": msg.module_c.theta, 
+            "C_Beta": msg.module_c.beta,
+            "C_kp_r": msg.module_c.kp_r,
+            "C_kp_l": msg.module_c.kp_l,
+            "C_kd_r": msg.module_c.kd_r,
+            "C_kd_l": msg.module_c.kd_l,
+            "C_torque_r": msg.module_c.torque_r,
+            "C_torque_l": msg.module_c.torque_l,
+            
+            "D_Theta": msg.module_d.theta, 
+            "D_Beta": msg.module_d.beta,
+            "D_kp_r": msg.module_d.kp_r,
+            "D_kp_l": msg.module_d.kp_l,
+            "D_kd_r": msg.module_d.kd_r,
+            "D_kd_l": msg.module_d.kd_l,
+            "D_torque_r": msg.module_d.torque_r,
+            "D_torque_l": msg.module_d.torque_l,
+        }
         # Add to ROS CMD Buffer
         self.ROS_CMD_Buffer += [CMDS.copy()]
         
     def execute(self):
         if self.current_index < len(self.ROS_CMD_Buffer):
             cmd = self.ROS_CMD_Buffer[self.current_index]
-            # 處理腳位目標
-            self.legs['A'].set_target(cmd["A_Theta"], -cmd["A_Beta"])
-            self.legs['B'].set_target(cmd["B_Theta"], -cmd["B_Beta"])
-            self.legs['C'].set_target(cmd["C_Theta"], -cmd["C_Beta"])
-            self.legs['D'].set_target(cmd["D_Theta"], -cmd["D_Beta"])
+            # 處理四腿目標（支援扭矩控制參數）
+            self.legs['A'].set_target(
+                cmd["A_Theta"], -cmd["A_Beta"],
+                cmd["A_kp_r"], cmd["A_kp_l"],
+                cmd["A_kd_r"], cmd["A_kd_l"],
+                cmd["A_torque_r"], cmd["A_torque_l"]
+            )
+            self.legs['B'].set_target(
+                cmd["B_Theta"], -cmd["B_Beta"],
+                cmd["B_kp_r"], cmd["B_kp_l"],
+                cmd["B_kd_r"], cmd["B_kd_l"],
+                cmd["B_torque_r"], cmd["B_torque_l"]
+            )
+            self.legs['C'].set_target(
+                cmd["C_Theta"], -cmd["C_Beta"],
+                cmd["C_kp_r"], cmd["C_kp_l"],
+                cmd["C_kd_r"], cmd["C_kd_l"],
+                cmd["C_torque_r"], cmd["C_torque_l"]
+            )
+            self.legs['D'].set_target(
+                cmd["D_Theta"], -cmd["D_Beta"],
+                cmd["D_kp_r"], cmd["D_kp_l"],
+                cmd["D_kd_r"], cmd["D_kd_l"],
+                cmd["D_torque_r"], cmd["D_torque_l"]
+            )
             
-            # 修正後的 Logger：外層改用單引號，避免與 cmd["Key"] 衝突
-            self.__node.get_logger().info(''.join([
-                f'\nReceived CMD: A({cmd["A_Theta"]:.5f}, {cmd["A_Beta"]:.2f})\n',
-                f'Received CMD: B({cmd["B_Theta"]:.5f}, {cmd["B_Beta"]:.2f})\n',
-                f'Received CMD: C({cmd["C_Theta"]:.5f}, {cmd["C_Beta"]:.2f})\n',
-                f'Received CMD: D({cmd["D_Theta"]:.5f}, {cmd["D_Beta"]:.2f})\n'
-            ]))
+            # 顯示扭矩控制參數
+            self.__node.get_logger().info(
+                f'[TORQUE] A: θ={cmd["A_Theta"]:.3f}, β={cmd["A_Beta"]:.3f}, '
+                f'kp={cmd["A_kp_r"]:.1f}, kd={cmd["A_kd_r"]:.2f}, '
+                f'τ={cmd["A_torque_r"]:.3f}'
+            )
+            
             self.current_index += 1
     
     def pub_tf(self):

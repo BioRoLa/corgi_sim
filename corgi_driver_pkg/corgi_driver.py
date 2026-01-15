@@ -273,6 +273,7 @@ class CorgiDriver:
         self.__self_node = self.__robot.getSelf()
         
         # 建立 /clock 發布器
+        self.ros_time_msg = Time()
         self.clock_pub = self.__node.create_publisher(Clock, 'clock', 1000)
         
         # 建立 TF 廣播器 (讓 Rviz 知道機器人在哪)
@@ -552,14 +553,15 @@ class CorgiDriver:
     
     def pub_clock(self):
         now = self.__robot.getTime()
-        ros_time_msg = Time()
-        ros_time_msg.sec = int(now) 
-        ros_time_msg.nanosec = int((now - int(now)) * 1e9)
-        self.clock_pub.publish(Clock(clock=ros_time_msg))
+        # self.ros_time_msg = Time()
+        self.ros_time_msg.sec = int(now) 
+        self.ros_time_msg.nanosec = int((now - int(now)) * 1e9)
+        self.clock_pub.publish(Clock(clock=self.ros_time_msg))
     
     def motor_state_publish(self):
         motor_state_msg = MotorStateStamped()
         motor_state_msg.header.seq = self.current_index
+        motor_state_msg.header.stamp = self.ros_time_msg
         # 取得所有馬達狀態
         motor_state_msg.module_a = self.legs['A'].get_states()
         motor_state_msg.module_b = self.legs['B'].get_states()
@@ -573,14 +575,6 @@ class CorgiDriver:
         # 讓 ROS 2 處理通訊 (這會讓 Logger 和 Topic 有作用)
         rclpy.spin_once(self.__node, timeout_sec=0)
         
-        # A. 發布模擬時間 /clock
-        self.pub_clock()
-        # B. 發布 TF
-        self.pub_tf()
-        # C. 發布 Motor State
-        self.motor_state_publish()
-        # D. 發布 IMU 資料
-        self.pub_imu()
         # ---------------------------------
         now = self.__robot.getTime()
         if Read_CSV:
@@ -612,9 +606,15 @@ class CorgiDriver:
                 self.current_index += 1
         else:
             self.execute()
-            # if self.ROS_CMD_Buffer:
-            #     self.execute()
-            # public trigger message enable = True
             self.trigger_pub.publish(self.trigger_msg)
+        
+        # A. 發布模擬時間 /clock
+        self.pub_clock()
+        # B. 發布 TF
+        self.pub_tf()
+        # C. 發布 Motor State
+        self.motor_state_publish()
+        # D. 發布 IMU 資料
+        self.pub_imu()
     # def step(self):
     #     rclpy.spin_once(self.__node, timeout_sec=0)

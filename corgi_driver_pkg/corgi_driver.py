@@ -527,8 +527,8 @@ class CorgiDriver:
                 sin_half = math.sin(half_angle)
                 
                 t = TransformStamped()
-                ros_time_msg = Time()
-                t.header.stamp = ros_time_msg
+                # ros_time_msg = Time()
+                t.header.stamp = self.ros_time_msg
                 t.header.frame_id = "odom"       # 父座標 (世界)
                 t.child_frame_id = "base_link"   # 子座標 (機器人本體)
                 

@@ -1,139 +1,73 @@
-# corgi_sim - Corgi Quadruped Robot Webots Simulation
+# corgi_sim - Corgi leg-wheel Robot Webots Simulation
 
-ROS2 simulation package for the Corgi quadruped robot using Webots.
-
-## CHANGELOG
-
-### Simulation Time Synchronization (Jan 2026)
-
-**Purpose**: Enable control nodes to synchronize with Webots simulation time instead of system wall clock.
-
-**Key Changes**:
-- ⏰ **Clock Publishing Priority**: `/clock` is now published **first** in each simulation step
-- ✅ **Improved Time Precision**: Fixed nanosecond overflow handling for accurate timestamps
-
-**For Control Node Developers**:
-```cpp
-// Use create_timer() instead of Rate::sleep()
-class YourControlNode : public rclcpp::Node {
-  YourControlNode() : Node("your_node") {
-    // Enable simulation time
-    this->declare_parameter("use_sim_time", true);
-    
-    // Use timer (will auto-sync with /clock)
-    timer_ = this->create_timer(
-      std::chrono::milliseconds(1),  // 1000 Hz
-      std::bind(&YourControlNode::control_loop, this)
-    );
-  }
-};
-```
-
-Launch with `use_sim_time:=true`:
-```bash
-ros2 run your_package your_node --ros-args -p use_sim_time:=true
-```
-
-See [Time Synchronization Guide](#time-synchronization) for details.
+ROS2 simulation package for the Corgi leg-wheel robot using Webots and `webots_ros2_driver`.
 
 ---
 
 ## Overview
 
-This package provides a complete simulation environment for the Corgi robot with:
+This package provides a Webots simulation environment for the Corgi robot using the `webots_ros2_driver` plugin architecture.
 
-- **Two launch modes available**:
-  - **Embedded controller mode** - Python controller runs inside Webots (new, experimental)
-  - **External driver mode** - Uses `webots_ros2_driver` with plugin architecture (legacy, stable)
-    - webots ros2 plugin required:
-    ```bash
-    sudo apt update
-    sudo apt install -y ros-humble-webots-ros2
-    ```
-- **Topic-based motor control** - Standard ROS2 pattern using `std_msgs/Float64`
-- **Theta-beta coordinate system** - Custom leg control coordinates for 2-motor-per-leg design
-- **Multiple simulation nodes** - Position and torque control modes
-- **CSV trajectory playback** - Replay pre-recorded motions
-- **⏰ Simulation time synchronization** - `/clock` topic for time-accurate control
+**Features:**
+- ✅ **Python driver plugin** - `corgi_driver_pkg.corgi_driver.CorgiDriver` runs as ROS2 plugin
+- ✅ **Theta-beta coordinate system** - Custom leg control for 2-motor-per-leg design
+- ✅ **ROS2 topic interface** - Standard `/motor/command` and `/motor/state` topics
+- ✅ **Simulation time sync** - `/clock` topic for time-accurate control
+- ✅ **TF broadcasting** - Publishes robot pose in `odom` frame
+- ✅ **IMU simulation** - Publishes orientation and acceleration data
+---
 
 ## Architecture
 
-### Mode 1: Embedded Controller (Default - `run_simulation.launch.py`)
-
 ```
-Webots Simulator
-  └─ corgi_ros2 (Python controller, runs inside Webots)
-      ├─ Publishes: /motor_name_sensor/value (encoder feedback)
-      └─ Subscribes: /motor_name/set_position (motor commands)
-          ↕
-corgi_sim_trq or corgi_sim_pos (C++ ROS2 node, runs externally)
-  ├─ Subscribes: /motor/command (MotorCmdStamped - theta/beta coords)
-  ├─ Publishes: /motor/state (MotorStateStamped - feedback)
-  └─ Converts theta-beta ↔ motor angles (phi_r, phi_l)
-      ↕
-Controller (e.g., corgi_csv_control)
-  └─ Publishes: /motor/command
-```
-
-### Mode 2: External Driver (Experimental - `Corgi_launch.py`)
-
-```
-Webots Simulator
-  └─ CorgiRobot (controller = "<extern>")
+Webots Simulator (IFS_Proto.wbt)
+  └─ CorgiRobot (controller = "<extern>", supervisor = TRUE)
       ↕
 webots_ros2_driver (ROS2 node)
-  ├─ Loads: corgi_driver_pkg.corgi_driver.CorgiDriver plugin
-  ├─ Publishes: /motor/state, /imu, /clock
-  └─ Subscribes: /motor/command
+  ├─ Loads: corgi_driver_pkg.corgi_driver.CorgiDriver
+  ├─ Publishes:
+  │   • /clock (rosgraph_msgs/Clock) - Simulation time
+  │   • /motor/state (corgi_msgs/MotorStateStamped) - Motor feedback in θ-β
+  │   • /imu (corgi_msgs/ImuStamped) - IMU data
+  │   • /tf (odom → base_link transform)
+  └─ Subscribes:
+      • /motor/command (corgi_msgs/MotorCmdStamped) - Motor commands in θ-β
       ↕
-Controller (e.g., corgi_csv_control)
+Your Controller Node (e.g., corgi_csv_control)
   └─ Publishes: /motor/command
 ```
 
-**Key Differences:**
-- **Embedded mode**: Controller runs *inside* Webots process, more reliable
-- **External driver mode**: Uses ROS 2 plugin architecture, more flexible but requires proper Python package setup
+---
+
+## Prerequisites
+
+```bash
+# Install Webots ROS2 driver
+sudo apt update
+sudo apt install ros-humble-webots-ros2
+
+# Ensure corgi_msgs is built first
+cd ~/corgi_ws/corgi_ros2_ws
+colcon build --packages-select corgi_msgs
+```
+
+---
 
 ## Quick Start
 
 ### 1. Build the Package
 
 ```bash
-cd ~/corgi_ws/corgi_ros_ws
+cd ~/corgi_ws/corgi_ros2_ws
 colcon build --packages-select corgi_sim
 source install/setup.bash
 ```
 
 ### 2. Launch Simulation
 
-#### Option A: Embedded Controller (Recommended)
-
 ```bash
-# Start Webots and simulation node
-ros2 launch corgi_sim run_simulation.launch.py
-```
-
-This will:
-
-- Launch Webots with the Corgi robot world
-- Start the `corgi_sim_trq` node (3 second delay to allow Webots to initialize)
-- Set up all topics for motor control and feedback
-
-#### Option B: External Driver (Experimental)
-
-```bash
-# Start Webots with external driver plugin
 ros2 launch corgi_sim Corgi_launch.py
 ```
-
-This will:
-
-- Launch Webots with `IFS_Proto.wbt` world
-- Start the `webots_ros2_driver` node
-- Load the `corgi_driver_pkg.corgi_driver.CorgiDriver` plugin
-- Directly publish/subscribe to `/motor/command` and `/motor/state` topics
-
-**Note**: The external driver mode requires the `corgi_driver_pkg` Python package to be properly installed. If you get `ModuleNotFoundError`, ensure you've rebuilt the package with `colcon build --packages-select corgi_sim`.
 
 ### 3. Run a Controller
 
@@ -142,264 +76,108 @@ In a separate terminal:
 ```bash
 source ~/corgi_ws/corgi_ros2_ws/install/setup.bash
 
-# Play a pre-recorded CSV trajectory
-ros2 run corgi_csv_control corgi_csv_control  demo_transform_sim --ros-args -p use_sim_time:=True
-
-# Or run other gaits
-ros2 run corgi_csv_control corgi_csv_control demo_walk_sim --ros-args -p use_sim_time:=True
+# Example: CSV trajectory playback
+ros2 run corgi_csv_control corgi_csv_control demo_walk_sim \
+  --ros-args -p use_sim_time:=true
 ```
-#### Note: 
-* must add **--ros-args -p use_sim_time:=True** to sync Node timer with Webots
 
-## Files and Directories
+**Important:** Always add `-p use_sim_time:=true` to sync with simulation clock!
 
-### Launch Files
-
-- `launch/run_simulation.launch.py` - **Main launch file** (embedded controller mode)
-- `launch/Corgi_launch.py` - **Alternative launch file** (external driver mode, experimental)
-
-### Executables
-
-- `corgi_sim_trq` - Main simulation node with torque/position control
-- `corgi_sim_pos` - Alternative simulation node (functionally identical)
-
-### Controllers (Webots-side)
-
-- `controllers/corgi_ros2/corgi_ros2.py` - Embedded Python controller running inside Webots (used by `run_simulation.launch.py`)
-- `controllers/force_plate/force_plate.py` - Force plate controller for specialized worlds
-
-### Python Driver Package
-
-- `corgi_driver_pkg/` - External ROS 2 driver plugin package (used by `Corgi_launch.py`)
-  - `corgi_driver.py` - Main `CorgiDriver` plugin class for `webots_ros2_driver`
-  - `Controller_TB.py` - Theta-beta coordinate conversion utilities
-  - `__init__.py` - Package initialization
-
-### Resource Files
-
-- `resource/corgi.urdf` - Robot description for external driver mode (references `corgi_driver_pkg.corgi_driver.CorgiDriver`)
-
-### Worlds
-
-- `worlds/corgi_origin.wbt` - Main simulation world (default)
-- `worlds/corgi_force_plate_proto.wbt` - World with ground force sensors
-- `worlds/corgi_uneven*.wbt` - Uneven terrain worlds
-- `worlds/corgi_stair_proto.wbt` - Stair climbing world
-
-### Input Data
-
-- `input_csv/` - Pre-recorded CSV trajectories for replay
-  - `demo_transform_sim.csv` - Mode transformation (legged ↔ wheeled)
-  - `demo_walk_sim.csv` - Walking gait
-  - `demo_*_real.csv` - Real robot trajectories (for reference)
-
-## Theta-Beta Coordinate System
-
-The Corgi robot uses a unique **theta-beta** control system for its 4-module, 2-motor-per-leg design:
-
-- **theta (θ)**: Leg spread angle - controls how wide the leg spreads
-- **beta (β)**: Leg rotation angle - controls leg rotation around the hip
-- **theta_0**: Physical offset constant (17° or 0.2967 rad)
-
-### Conversion Functions
-
-```cpp
-// Motor angles to theta-beta
-void phi2tb(double phi_r, double phi_l, double &theta, double &beta) {
-    theta = (phi_l - phi_r) / 2.0 + theta_0;
-    beta = (phi_l + phi_r) / 2.0;
-}
-
-// Theta-beta to motor angles
-void tb2phi(double theta, double beta, double &phi_r, double &phi_l) {
-    phi_r = beta - theta + theta_0;
-    phi_l = beta + theta - theta_0;
-}
-```
+---
 
 **Motor naming convention:**
 
-- Module A (LF): AR (left), AL (right)
-- Module B (RF): BR (left), BL (right)
-- Module C (RH): CR (left), CL (right)
-- Module D (LH): DR (left), DL (right)
+- Module A (LF - Left Front): A_L_Motor (left), A_R_Motor (right)
+- Module B (RF - Right Front): B_L_Motor (left), B_R_Motor (right)
+- Module C (RH - Rear Right): C_L_Motor (left), C_R_Motor (right)
+- Module D (LH - Left Rear): D_L_Motor (left), D_R_Motor (right)
 
 ## ROS2 Topics
 
-### Published by corgi_sim_trq
+### Published by CorgiDriver
 
-- `/motor/state` (corgi_msgs/MotorStateStamped) - Current motor positions in theta-beta
-- `/imu/filtered` (sensor_msgs/Imu) - Filtered IMU data (gravity compensated)
-- `/trigger` (corgi_msgs/TriggerStamped) - Simulation trigger/enable status
+- `/clock` (rosgraph_msgs/Clock) - Simulation time
+- `/motor/state` (corgi_msgs/MotorStateStamped) - Motor positions (θ, β), velocities, torques
+- `/imu` (corgi_msgs/ImuStamped) - Orientation (quaternion), angular velocity, linear acceleration
+- `/tf` (tf2_msgs/TFMessage) - Transform: `odom → base_link`
 
-### Subscribed by corgi_sim_trq
+### Subscribed by CorgiDriver
 
-- `/motor/command` (corgi_msgs/MotorCmdStamped) - Desired motor positions in theta-beta
-- `/imu` (sensor_msgs/Imu) - Raw IMU data from Webots
+- `/motor/command` (corgi_msgs/MotorCmdStamped) - Desired θ, β, PID gains (kp, kd), feedforward torques
 
-### Internal Topics (Webots controller ↔ sim node)
+---
 
-- `/lf_left_motor/set_position` through `/lh_right_motor/set_position` - Motor position commands (std_msgs/Float64)
-- `/lf_left_motor_sensor/value` through `/lh_right_motor_sensor/value` - Encoder feedback (std_msgs/Float64)
+## Package Structure
 
-## Parameters
-
-### corgi_sim_trq
-
-- `output_filename` (string, default: "") - CSV filename for data logging
-  - If empty, no data is recorded
-  - If specified, logs to `output_data/<filename>.csv`
-
-Example:
-
-```bash
-ros2 run corgi_sim corgi_sim_trq --ros-args -p output_filename:="my_experiment.csv"
 ```
-
-## Development
-
-### Creating New Controllers
-
-To create a custom controller that commands the robot:
-
-1. Subscribe to `/motor/state` to get current positions
-2. Publish to `/motor/command` with desired theta-beta positions
-3. Use the motor naming convention (module_a, module_b, module_c, module_d)
-
-Example minimal controller:
-
-```cpp
-auto motor_cmd_pub = node->create_publisher<corgi_msgs::msg::MotorCmdStamped>("motor/command", 10);
-
-corgi_msgs::msg::MotorCmdStamped cmd;
-cmd.module_a.theta = 0.5;  // 0.5 rad spread
-cmd.module_a.beta = 0.0;   // 0 rad rotation
-// Set module_b, module_c, module_d similarly...
-
-motor_cmd_pub->publish(cmd);
+corgi_sim/
+├── CMakeLists.txt          # Minimal build config (Python only)
+├── package.xml             # Dependencies: webots_ros2_driver, corgi_msgs
+├── launch/
+│   └── Corgi_launch.py     # Main launch file
+├── protos/
+│   └── CorgiRobot.proto    # Webots robot definition
+├── resource/
+│   └── corgi.urdf          # Plugin reference
+└── corgi_driver_pkg/       # Python driver package
+    ├── __init__.py
+    ├── corgi_driver.py     # CorgiDriver plugin class
+    └── Controller_TB.py    # θ-β conversion utilities
 ```
-
-### Modifying the Webots Controller
-
-**For embedded controller mode** (`run_simulation.launch.py`):
-- Edit `controllers/corgi_ros2/corgi_ros2.py`
-- This runs inside Webots process (no network communication)
-- Publishes encoder values at simulation rate
-- Subscribes to motor position commands
-- Handles NaN guards for safety
-
-**For external driver mode** (`Corgi_launch.py`):
-- Edit `corgi_driver_pkg/corgi_driver.py`
-- This is a ROS 2 plugin loaded by `webots_ros2_driver`
-- Must inherit from `Supervisor` and implement the plugin interface
-- Requires rebuild after changes: `colcon build --packages-select corgi_sim`
-
-### Creating a Custom External Driver Plugin
-
-If you want to create a new external driver:
-
-1. **Create the plugin file** in `corgi_driver_pkg/`:
-   ```python
-   from controller import Supervisor
-   
-   class MyCustomDriver:
-       def init(self, webots_node, properties):
-           self.__robot = webots_node.robot
-           # Initialize your plugin
-       
-       def step(self):
-           # Called every simulation step
-           pass
-   ```
-
-2. **Update URDF** (`resource/corgi.urdf`):
-   ```xml
-   <plugin type="corgi_driver_pkg.my_custom_driver.MyCustomDriver" />
-   ```
-
-3. **Rebuild**:
-   ```bash
-   colcon build --packages-select corgi_sim
-   source install/setup.bash
-   ```
-
-### Adding New World Files
-
-1. Create `.wbt` file in `worlds/`
-2. Ensure robot uses `controller "corgi_ros2"`
-3. Update launch file if you want a dedicated launcher
 
 ## Troubleshooting
 
-### ModuleNotFoundError: No module named 'corgi_driver_pkg.corgi_driver'
+### ModuleNotFoundError: 'corgi_driver_pkg'
 
-This error occurs when using `Corgi_launch.py` (external driver mode). To fix:
+```bash
+# Rebuild package
+cd ~/corgi_ws/corgi_ros2_ws
+colcon build --packages-select corgi_sim
+source install/setup.bash
 
-1. **Verify the Python package exists**:
-   ```bash
-   ls ~/corgi_ws/corgi_ros2_ws/src/corgi_sim/corgi_driver_pkg/
-   # Should show: __init__.py, corgi_driver.py, Controller_TB.py
-   ```
-
-2. **Rebuild the package**:
-   ```bash
-   cd ~/corgi_ws/corgi_ros2_ws
-   colcon build --packages-select corgi_sim
-   source install/setup.bash
-   ```
-
-3. **Verify installation**:
-   ```bash
-   python3 -c "import corgi_driver_pkg.corgi_driver"
-   # Should complete without error
-   ```
-
-4. **If still failing**, use the embedded controller mode instead:
-   ```bash
-   ros2 launch corgi_sim run_simulation.launch.py
-   ```
-
-### Webots doesn't start
-
-- Check `DISPLAY` variable: `export DISPLAY=:0`
-- Verify Webots installation: `/usr/local/bin/webots --version`
-- Check X server is running (if on WSL)
-
-### Robot doesn't move
-
-- Check topics: `ros2 topic list`
-- Verify controller is publishing: `ros2 topic echo /motor/command`
-- Check simulation node is running: `ros2 node list`
-- Look for NaN errors in console (indicates invalid commands)
-
-### "NaN position" errors at startup
-
-- These are harmless initialization messages
-- Occur before `corgi_sim_trq` starts publishing
-- Robot will move normally once controller begins
-
-### Motor positions look wrong
-
-- Verify you're using theta-beta coordinates, not direct motor angles
-- Check theta_0 offset is applied (17° = 0.2967 rad)
-- Ensure theta >= theta_0 (enforced minimum spread)
-
-## Related Packages
-
-- **corgi_csv_control** - CSV trajectory playback controller
-- **corgi_msgs** - Custom message definitions (must be built first)
-- **corgi_gait_generate** - Gait generation libraries
-- **corgi_panel** - GUI control panel for real robot
-
-## Citation
-
-If you use this simulation in your research, please cite:
-
-```
-Corgi Quadruped Robot Simulation
-Bio-Inspired Robotic Laboratory (BioRoLa), National Taiwan University
+# Verify installation
+python3 -c "import corgi_driver_pkg.corgi_driver"
 ```
 
-## License
+### Robot doesn't respond to commands
 
-[Add your license here]
+Check topics:
+```bash
+# Verify driver is publishing
+ros2 topic echo /motor/state
+
+# Verify controller is publishing
+ros2 topic echo /motor/command
+
+# Check time sync
+ros2 topic echo /clock
+```
+
+### Controller runs too fast/slow
+
+Ensure `use_sim_time:=true`:
+```bash
+ros2 run your_pkg your_node --ros-args -p use_sim_time:=true
+
+# Verify parameter
+ros2 param get /your_node use_sim_time
+# Should return: Boolean value is: True
+```
+
+### Motors produce NaN or invalid values
+
+Check command values:
+- `theta >= theta_0` (minimum 0.2967 rad)
+- All gains are positive
+- Torques are within ±35 N·m (Max_Torque limit)
+
+---
+
+## Default Parameters
+
+**PID Gains (in CorgiDriver):**
+```python
+KP = 1000.0         # Position proportional gain
+KD = 1.0            # Velocity derivative gain  
+Max_Torque = 35.0   # Maximum motor torque (N·m)
+```

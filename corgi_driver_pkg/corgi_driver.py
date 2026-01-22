@@ -542,11 +542,26 @@ class CorgiDriver:
         self.imu_sensor.imu_pub.publish(imu_msg)
     
     def pub_clock(self):
+        """pub sim clock to /clock topic"""
         now = self.__robot.getTime()
-        # self.ros_time_msg = Time()
-        self.ros_time_msg.sec = int(now) 
-        self.ros_time_msg.nanosec = int((now - int(now)) * 1e9)
-        self.clock_pub.publish(Clock(clock=self.ros_time_msg))
+        
+        # 更精確的時間轉換
+        sec = int(now)
+        nsec = int((now - sec) * 1e9)
+        
+        # 處理 nanosecond 溢出（重要！）
+        if nsec >= 1000000000:
+            sec += 1
+            nsec = nsec % 1000000000
+        elif nsec < 0:
+            nsec = 0
+        
+        self.ros_time_msg.sec = sec
+        self.ros_time_msg.nanosec = nsec
+        
+        clock_msg = Clock()
+        clock_msg.clock = self.ros_time_msg
+        self.clock_pub.publish(clock_msg)
     
     def motor_state_publish(self):
         motor_state_msg = MotorStateStamped()
@@ -562,10 +577,13 @@ class CorgiDriver:
     # 5. [回歸標準] 使用 step 回調
     # Webots 外部驅動程式會不斷呼叫這個函式
     def step(self):
-        # 讓 ROS 2 處理通訊 (這會讓 Logger 和 Topic 有作用)
+        # === 1. pub clock ===
+        self.pub_clock()
+        
+        # === 2. process ros2 communication ===
         rclpy.spin_once(self.__node, timeout_sec=0)
         
-        # ---------------------------------
+        # === 3. control logic  ===
         now = self.__robot.getTime()
         if Read_CSV:
             # 如果時間超過 5 秒，且「之前還沒暫停過」
@@ -595,15 +613,19 @@ class CorgiDriver:
                                                         f"Received CMD: D( {row[6]:.5f}, {row[7]:.2f})\n"]))
                 self.current_index += 1
         else:
+            # 每秒記錄一次狀態
+            if int(now * 1000) % 1000 == 0:
+                self.__node.get_logger().info(
+                    f"🟢 ROS Mode | Time: {now:.2f}s | "
+                    f"Buffer: {len(self.ROS_CMD_Buffer)} cmds | "
+                    f"Executing: {self.current_index}"
+                )
             self.execute()
         
-        # A. 發布模擬時間 /clock
-        self.pub_clock()
-        # B. 發布 TF
+        # === 4. pub datas ===
+        # TF
         self.pub_tf()
-        # C. 發布 Motor State
+        # Motor State
         self.motor_state_publish()
-        # D. 發布 IMU 資料
+        # IMU
         self.pub_imu()
-    # def step(self):
-    #     rclpy.spin_once(self.__node, timeout_sec=0)

@@ -2,6 +2,42 @@
 
 ROS2 simulation package for the Corgi quadruped robot using Webots.
 
+## CHANGELOG
+
+### Simulation Time Synchronization (Jan 2026)
+
+**Purpose**: Enable control nodes to synchronize with Webots simulation time instead of system wall clock.
+
+**Key Changes**:
+- ⏰ **Clock Publishing Priority**: `/clock` is now published **first** in each simulation step
+- ✅ **Improved Time Precision**: Fixed nanosecond overflow handling for accurate timestamps
+
+**For Control Node Developers**:
+```cpp
+// Use create_timer() instead of Rate::sleep()
+class YourControlNode : public rclcpp::Node {
+  YourControlNode() : Node("your_node") {
+    // Enable simulation time
+    this->declare_parameter("use_sim_time", true);
+    
+    // Use timer (will auto-sync with /clock)
+    timer_ = this->create_timer(
+      std::chrono::milliseconds(1),  // 1000 Hz
+      std::bind(&YourControlNode::control_loop, this)
+    );
+  }
+};
+```
+
+Launch with `use_sim_time:=true`:
+```bash
+ros2 run your_package your_node --ros-args -p use_sim_time:=true
+```
+
+See [Time Synchronization Guide](#time-synchronization) for details.
+
+---
+
 ## Overview
 
 This package provides a complete simulation environment for the Corgi robot with:
@@ -18,6 +54,7 @@ This package provides a complete simulation environment for the Corgi robot with
 - **Theta-beta coordinate system** - Custom leg control coordinates for 2-motor-per-leg design
 - **Multiple simulation nodes** - Position and torque control modes
 - **CSV trajectory playback** - Replay pre-recorded motions
+- **⏰ Simulation time synchronization** - `/clock` topic for time-accurate control
 
 ## Architecture
 

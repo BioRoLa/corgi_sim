@@ -1,8 +1,5 @@
 import rclpy
 import math
-import csv
-import os
-from ament_index_python.packages import get_package_share_directory
 
 # --- Webots 控制器模組 (用於控制模擬狀態) ---
 from controller import Supervisor
@@ -19,9 +16,6 @@ from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
 
 from . import Controller_TB
-# -------------------------------------
-# Read_CSV = not False
-Read_CSV = False
 
 class imu:
     def __init__(self, robot, node, basic_time_step=1):
@@ -201,12 +195,12 @@ class LegManager:
             elif trq_l < -self.Max_Torque:
                 trq_l = -self.Max_Torque
             self.motors["L_Motor"].setTorque(trq_l)
-            # self.__node.get_logger().info(f"[{self.prefix}] Set L_Motor Torque: {trq_l:.3f} Nm")
         # print debug info
         return "".join([f"[{self.prefix}] Target θ: {theta:.3f} rad, β: {beta:.3f} rad | ",
                                       f"Cmd L: {cmd_L:.3f} rad, R: {cmd_R:.3f} rad | ",
                                       f"Pos L: {pos_l:.3f} rad, R: {pos_r:.3f} rad | ",
                                       f"Trq L: {trq_l:.3f} Nm, R: {trq_r:.3f} Nm"])
+    
     def _find_closest_phi(self, phi_target, phi_current):
         """
         找到最接近的等價角度（處理 2π 週期性）
@@ -231,8 +225,7 @@ class LegManager:
         for name, motor in self.motors.items():
             torques[self.prefix + name] = motor.getTorqueFeedback()
         return torques
-    
-    
+      
     def get_states(self):
         pos_l = self.sensors["L_Motor"].getValue()
         pos_r = self.sensors["R_Motor"].getValue()
@@ -254,7 +247,7 @@ class LegManager:
         return msg
     
 class CorgiDriver:
-    def init(self, webots_node):
+    def init(self, webots_node, properties):
 
         # 1. set webot
         # get webot robot
@@ -314,8 +307,8 @@ class CorgiDriver:
             self.cb_motor,
             1000
         )
-        # ROS CMD Buffer from motor callback
-        self.ROS_CMD_Buffer = []
+        # Received commands from motor callback
+        self.received_commands = []
         
         
         # Default position when no message received
@@ -330,31 +323,12 @@ class CorgiDriver:
             1000
         )
         
+        # Initialize executing index for ROS control
+        self.executing_index = 0
+        self.__node.get_logger().info("Driver Initialized!")
         
-        if Read_CSV:
-            # 4. 讀取 CSV
-            self.trajectory_data = []
-            self.current_index = 0
-            try:
-                pkg_path = get_package_share_directory('corgi_ros_control')
-                csv_path = os.path.join(pkg_path, 'resource', 'COT_Exp_Index_140_OLD.csv')
-                
-                # 使用我們自己的 node logger，現在這行不會報錯了！
-                self.__node.get_logger().info(f"Loading CSV: {csv_path}")
-                
-                with open(csv_path, 'r') as file:
-                    reader = csv.reader(file)
-                    for row in reader:
-                        try:
-                            self.trajectory_data.append([float(val) for val in row])
-                        except ValueError: continue
-                self.__node.get_logger().info(f"✅ CSV Loaded: {len(self.trajectory_data)} rows")
-            except Exception as e:
-                self.__node.get_logger().error(f"❌ CSV Error: {str(e)}")
-        else:       #ROS Control Mode
-            self.__node.get_logger().info("⚠️ CSV Reading Disabled")
-            self.current_index = 0
-        self.__node.get_logger().info("🚀 Driver Initialized! Waiting for Play button...")
+        # Pause simulation at the beginning
+        self.__robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
         
     # Motor Command callback
     def cb_motor(self, msg):
@@ -401,37 +375,37 @@ class CorgiDriver:
             "D_torque_r": msg.module_d.torque_r,
             "D_torque_l": msg.module_d.torque_l,
         }
-        # Add to ROS CMD Buffer
-        self.ROS_CMD_Buffer += [CMDS.copy()]
+        # Add to received commands list
+        self.received_commands += [CMDS.copy()]
         
     def execute_motor(self):
         
-        if self.current_index < len(self.ROS_CMD_Buffer):
-            cmd = self.ROS_CMD_Buffer[self.current_index]
+        if self.executing_index < len(self.received_commands):
+            cmd = self.received_commands[self.executing_index]
             # 處理四腿目標（使用固定 PID 參數）
-            debug_info = "\n"
-            debug_info += self.legs['A'].set_target(
+            motor_debug_msg = "\n"
+            motor_debug_msg += self.legs['A'].set_target(
                 cmd["A_Theta"], -cmd["A_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
             )
-            debug_info += "\n"
-            debug_info += self.legs['B'].set_target(
+            motor_debug_msg += "\n"
+            motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], -cmd["B_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
             )
-            debug_info += "\n"
-            debug_info += self.legs['C'].set_target(
+            motor_debug_msg += "\n"
+            motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], -cmd["C_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
             )
-            debug_info += "\n"
-            debug_info += self.legs['D'].set_target(
+            motor_debug_msg += "\n"
+            motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], -cmd["D_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
@@ -439,46 +413,46 @@ class CorgiDriver:
             )
             
             # 顯示扭矩控制參數（使用固定 PID 值）
-            self.__node.get_logger().info(
-                debug_info
+            self.__node.get_logger().debug(
+                motor_debug_msg
             )
             
-            self.current_index += 1
+            self.executing_index += 1
             
-        elif self.current_index == len(self.ROS_CMD_Buffer) and self.current_index:
+        elif self.executing_index == len(self.received_commands) and self.executing_index:
             # keep the last command
-            cmd = self.ROS_CMD_Buffer[self.current_index - 1]
-            debug_info = "\n"
-            debug_info += self.legs['A'].set_target(
+            cmd = self.received_commands[self.executing_index - 1]
+            motor_debug_msg = "\n"
+            motor_debug_msg += self.legs['A'].set_target(
                 cmd["A_Theta"], -cmd["A_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["A_torque_r"], cmd["A_torque_l"]
             )
-            debug_info += "\n"
-            debug_info += self.legs['B'].set_target(
+            motor_debug_msg += "\n"
+            motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], -cmd["B_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["B_torque_r"], cmd["B_torque_l"]
             )
-            debug_info += "\n"
-            debug_info += self.legs['C'].set_target(
+            motor_debug_msg += "\n"
+            motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], -cmd["C_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["C_torque_r"], cmd["C_torque_l"]
             )
-            debug_info += "\n"
-            debug_info += self.legs['D'].set_target(
+            motor_debug_msg += "\n"
+            motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], -cmd["D_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["D_torque_r"], cmd["D_torque_l"]
             )
             
-            self.__node.get_logger().info(
-                debug_info
+            self.__node.get_logger().debug(
+                motor_debug_msg
             )
             
         else:
@@ -543,18 +517,17 @@ class CorgiDriver:
         time_stamp = Time()
         time_stamp.sec = int(self.__robot.getTime())
         time_stamp.nanosec = int((self.__robot.getTime() - int(self.__robot.getTime())) * 1e9)
-        imu_msg = self.imu_sensor.get_msg(time_stamp, self.current_index)
+        imu_msg = self.imu_sensor.get_msg(time_stamp, self.executing_index)
         self.imu_sensor.imu_pub.publish(imu_msg)
     
     def pub_clock(self):
         """pub sim clock to /clock topic"""
         now = self.__robot.getTime()
         
-        # 更精確的時間轉換
         sec = int(now)
         nsec = int((now - sec) * 1e9)
         
-        # 處理 nanosecond 溢出（重要！）
+        # handle nanosecond overflow
         if nsec >= 1000000000:
             sec += 1
             nsec = nsec % 1000000000
@@ -570,7 +543,7 @@ class CorgiDriver:
     
     def pub_motor_state(self):
         motor_state_msg = MotorStateStamped()
-        motor_state_msg.header.seq = self.current_index
+        motor_state_msg.header.seq = self.executing_index
         motor_state_msg.header.stamp = self.ros_time_msg
         # 取得所有馬達狀態
         motor_state_msg.module_a = self.legs['A'].get_states()
@@ -579,7 +552,7 @@ class CorgiDriver:
         motor_state_msg.module_d = self.legs['D'].get_states()
         self.motor_state_pub.publish(motor_state_msg)
     
-    # Webots 外部驅動程式會不斷呼叫這個函式
+    # Webots main loop, Webots will call this function
     def step(self):
         # === 1. pub clock ===
         self.pub_clock()
@@ -588,43 +561,7 @@ class CorgiDriver:
         rclpy.spin_once(self.__node, timeout_sec=0)
         
         # === 3. control logic  ===
-        now = self.__robot.getTime()
-        if Read_CSV:
-            # 如果時間超過 5 秒，且「之前還沒暫停過」
-            if now >= 5.0 and not self.has_paused:
-                self.__node.get_logger().warn("⏸️ Time is up (5s)! Pausing Simulation...")
-                
-                # 設定模擬模式為 PAUSE (暫停)
-                self.__robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
-                
-                # [重要] 標記為已暫停，這樣當您手動按 Play 繼續時，才不會又卡住
-                self.has_paused = True
-            # ---------------------------------
-            # 存活確認 Log (每 1 秒印一次)
-            # 如果這一行有印出來，代表「程式在跑」
-            if int(now * 1000) % 1000 == 0:
-                self.__node.get_logger().info(f"🟢 Running... Time: {now:.2f}s | Idx: {self.current_index}")
-            # 播放 CSV
-            if self.current_index < len(self.trajectory_data):
-                row = self.trajectory_data[self.current_index]
-                self.legs['A'].set_target(row[0], -row[1])
-                self.legs['B'].set_target(row[2], -row[3])
-                self.legs['C'].set_target(row[4], -row[5])
-                self.legs['D'].set_target(row[6], -row[7])
-                self.__node.get_logger().info("".join([ f"\nReceived CMD: A( {row[0]:.5f}, {row[1]:.2f})\n",
-                                                        f"Received CMD: B( {row[2]:.5f}, {row[3]:.2f})\n",
-                                                        f"Received CMD: C( {row[4]:.5f}, {row[5]:.2f})\n",
-                                                        f"Received CMD: D( {row[6]:.5f}, {row[7]:.2f})\n"]))
-                self.current_index += 1
-        else:
-            # 每秒記錄一次狀態
-            if int(now * 1000) % 1000 == 0:
-                self.__node.get_logger().info(
-                    f"🟢 ROS Mode | Time: {now:.2f}s | "
-                    f"Buffer: {len(self.ROS_CMD_Buffer)} cmds | "
-                    f"Executing: {self.current_index}"
-                )
-            self.execute_motor()
+        self.execute_motor()
         
         # === 4. pub datas ===
         # TF

@@ -254,13 +254,17 @@ class LegManager:
         return msg
     
 class CorgiDriver:
-    def init(self, webots_node, properties):
-        # 1. 取得 Webots 機器人
+    def init(self, webots_node):
+
+        # 1. set webot
+        # get webot robot
         self.__robot = webots_node.robot
         self.__timestep = int(self.__robot.getBasicTimeStep())
-        # [新增] 暫停旗標：確保只會自動暫停一次
+
+        # paused flag
         self.has_paused = False
-        # 2. 初始化 ROS 2 並建立我們自己的 Node
+
+        # 2. init ros2 node
         # 先檢查是否已經 init 過，避免重複報錯
         if not rclpy.ok():
             rclpy.init(args=None)
@@ -287,7 +291,7 @@ class CorgiDriver:
         self.Max_Torque = 35.0
         self.trq_feedforward = 0  # N·m 前饋扭矩
         
-        # 3. 初始化運動學
+        # 3. initialize Legs
         self.tb_lib = Controller_TB.Controller_TB(theta_0=math.radians(17))
         self.legs = {
             'A': LegManager(self.__robot, "A_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
@@ -299,14 +303,15 @@ class CorgiDriver:
             'D': LegManager(self.__robot, "D_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
                              basic_time_step=self.__timestep, Max_Torque=self.Max_Torque)
         }
-        # 4. 初始化 IMU
+
+        # 4. initialize IMU
         self.imu_sensor = imu(self.__robot, self.__node, basic_time_step=self.__timestep)
         
         # 5. Motor Command Subscriber
         self.motor_sub = self.__node.create_subscription(
             MotorCmdStamped,
             'motor/command',
-            self.motor_callback,
+            self.cb_motor,
             1000
         )
         # ROS CMD Buffer from motor callback
@@ -351,8 +356,8 @@ class CorgiDriver:
             self.current_index = 0
         self.__node.get_logger().info("🚀 Driver Initialized! Waiting for Play button...")
         
-    # 4. [新增] Motor Command 回調
-    def motor_callback(self, msg):
+    # Motor Command callback
+    def cb_motor(self, msg):
         """
         當收到 C++ 發來的 MotorCmdStamped 時觸發
         """
@@ -399,7 +404,7 @@ class CorgiDriver:
         # Add to ROS CMD Buffer
         self.ROS_CMD_Buffer += [CMDS.copy()]
         
-    def execute(self):
+    def execute_motor(self):
         
         if self.current_index < len(self.ROS_CMD_Buffer):
             cmd = self.ROS_CMD_Buffer[self.current_index]
@@ -563,7 +568,7 @@ class CorgiDriver:
         clock_msg.clock = self.ros_time_msg
         self.clock_pub.publish(clock_msg)
     
-    def motor_state_publish(self):
+    def pub_motor_state(self):
         motor_state_msg = MotorStateStamped()
         motor_state_msg.header.seq = self.current_index
         motor_state_msg.header.stamp = self.ros_time_msg
@@ -574,7 +579,6 @@ class CorgiDriver:
         motor_state_msg.module_d = self.legs['D'].get_states()
         self.motor_state_pub.publish(motor_state_msg)
     
-    # 5. [回歸標準] 使用 step 回調
     # Webots 外部驅動程式會不斷呼叫這個函式
     def step(self):
         # === 1. pub clock ===
@@ -620,12 +624,12 @@ class CorgiDriver:
                     f"Buffer: {len(self.ROS_CMD_Buffer)} cmds | "
                     f"Executing: {self.current_index}"
                 )
-            self.execute()
+            self.execute_motor()
         
         # === 4. pub datas ===
         # TF
         self.pub_tf()
         # Motor State
-        self.motor_state_publish()
+        self.pub_motor_state()
         # IMU
         self.pub_imu()

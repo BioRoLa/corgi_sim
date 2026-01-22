@@ -15,7 +15,6 @@ from geometry_msgs.msg import Quaternion
 from geometry_msgs.msg import Vector3
 from tf2_ros import TransformBroadcaster
 from corgi_msgs.msg import MotorCmdStamped
-from corgi_msgs.msg import TriggerStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
 
@@ -319,12 +318,6 @@ class CorgiDriver:
         self.default_beta = 0.0
         
         # ROS Control Mode Flag
-        self.trigger_pub = self.__node.create_publisher(
-            TriggerStamped,
-            "trigger",
-            1000
-        )
-        self.trigger_msg = TriggerStamped()
         # motor state publisher
         self.motor_state_pub = self.__node.create_publisher(
             MotorStateStamped,
@@ -355,9 +348,6 @@ class CorgiDriver:
                 self.__node.get_logger().error(f"❌ CSV Error: {str(e)}")
         else:       #ROS Control Mode
             self.__node.get_logger().info("⚠️ CSV Reading Disabled")
-            # public trigger message enable = True
-            self.trigger_msg.enable = True
-            self.trigger_pub.publish(self.trigger_msg)
             self.current_index = 0
         self.__node.get_logger().info("🚀 Driver Initialized! Waiting for Play button...")
         
@@ -606,7 +596,6 @@ class CorgiDriver:
                 self.current_index += 1
         else:
             self.execute()
-            self.trigger_pub.publish(self.trigger_msg)
         
         # A. 發布模擬時間 /clock
         self.pub_clock()

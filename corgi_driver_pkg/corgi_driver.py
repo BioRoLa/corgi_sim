@@ -14,6 +14,7 @@ from tf2_ros import TransformBroadcaster
 from corgi_msgs.msg import MotorCmdStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
+from corgi_msgs.msg import RobotStateStamped
 
 from . import Controller_TB
 
@@ -323,6 +324,13 @@ class CorgiDriver:
             1000
         )
         
+        # FSM publisher
+        self.fsm_pub = self.__node.create_publisher(
+            RobotStateStamped,
+            'robot/state',
+            1000
+        )
+        
         # Initialize executing index for ROS control
         self.executing_index = 0
         self.__node.get_logger().info("Driver Initialized!")
@@ -552,6 +560,14 @@ class CorgiDriver:
         motor_state_msg.module_d = self.legs['D'].get_states()
         self.motor_state_pub.publish(motor_state_msg)
     
+    def pub_fsm(self):
+        """Publish robot state with standby mode"""
+        fsm_msg = RobotStateStamped()
+        fsm_msg.header.seq = self.executing_index
+        fsm_msg.header.stamp = self.ros_time_msg
+        fsm_msg.robot_mode = 3  # standby mode
+        self.fsm_pub.publish(fsm_msg)
+    
     # Webots main loop, Webots will call this function
     def step(self):
         # === 1. pub clock ===
@@ -570,3 +586,5 @@ class CorgiDriver:
         self.pub_motor_state()
         # IMU
         self.pub_imu()
+        # FSM
+        self.pub_fsm()

@@ -32,9 +32,18 @@ def generate_launch_description():
         respawn=True    #maintain connection if Webots restarts
     )
 
+    # 4. 啟動 corgi_data_recorder
+    data_recorder = Node(
+        package='corgi_data_recorder',
+        executable='corgi_data_recorder',
+        name='corgi_data_recorder',
+        output='screen'
+    )
+
     return LaunchDescription([
         webots,
         robot_driver,
+        data_recorder,
         launch.actions.RegisterEventHandler(
             event_handler=launch.event_handlers.OnProcessExit(
                 target_action=webots,

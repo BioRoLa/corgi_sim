@@ -10,9 +10,6 @@ def generate_launch_description():
     package_dir = get_package_share_directory('corgi_sim')
     
     # 1. 設定 Webots 世界檔路徑
-    # 假設您的世界檔還在私人 Repo，您可以直接指向絕對路徑 (開發階段方便)
-    # 或者把它複製到 package 的 worlds 資料夾
-    # 這裡我們先用一個變數，請修改為您真實的 .wbt 路徑
     world_path = os.path.join(package_dir, 'worlds', "IFS_Proto.wbt")
 
     # 2. 啟動 Webots
@@ -37,8 +34,11 @@ def generate_launch_description():
         package='corgi_data_recorder',
         executable='corgi_data_recorder',
         name='corgi_data_recorder',
-        output='screen'
+        output='screen',
+        parameters=[{'use_sim_time': True}]
     )
+
+    # TODO: add corgi panel to run csv control and trigger.
 
     return LaunchDescription([
         webots,

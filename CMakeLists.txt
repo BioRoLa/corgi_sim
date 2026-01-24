@@ -13,6 +13,7 @@ install(DIRECTORY
   launch
   protos
   resource
+  worlds
   DESTINATION share/${PROJECT_NAME}
 )
 

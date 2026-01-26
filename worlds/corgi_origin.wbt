@@ -24,7 +24,7 @@ Floor {
     colorOverride 0.933333 0.933333 0.92549
   }
 }
-DEF CORGI Robot {
+DEF CorgiRobot Robot {
   translation 0 0 0.399842
   rotation 0.9999999720059386 0.0001682049528554934 -0.00016641879678870364 1.570796353009951
   children [
@@ -193,18 +193,18 @@ DEF CORGI Robot {
     DEF LF_Rmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position 4.221840193831938e-08
-        axis 0 0 -1
+        axis 0 0 1
         anchor 0.222 0 -0.2
       }
       device [
         DEF lf_right_motor RotationalMotor {
-          name "lf_right_motor"
+          name "A_Module_R_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "lf_right_motor_sensor"
+          name "A_Module_R_Motor_sensor"
         }
       ]
       endPoint DEF LF_rmotorbar Solid {
@@ -1160,18 +1160,18 @@ DEF CORGI Robot {
     DEF LF_Lmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position -4.570132146821392e-08
-        axis 0 0 -1
+        axis 0 0 1
         anchor 0.222 0 -0.2
       }
       device [
         DEF lf_left_motor RotationalMotor {
-          name "lf_left_motor"
+          name "A_Module_L_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "lf_left_motor_sensor"
+          name "A_Module_L_Motor_sensor"
         }
       ]
       endPoint DEF LF_lmotorbar Solid {
@@ -2047,18 +2047,18 @@ DEF CORGI Robot {
     DEF LH_Rmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position 4.221840942299205e-08
-        axis 0 0 -1
+        axis 0 0 1
         anchor -0.222 0 -0.2
       }
       device [
         DEF lh_right_motor RotationalMotor {
-          name "lh_right_motor"
+          name "D_Module_R_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "lh_right_motor_sensor"
+          name "D_Module_R_Motor_sensor"
         }
       ]
       endPoint DEF LH_rmotorbar Solid {
@@ -2194,18 +2194,18 @@ DEF CORGI Robot {
     DEF LH_Lmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position -4.5701303186262976e-08
-        axis 0 0 -1
+        axis 0 0 1
         anchor -0.222 0 -0.2
       }
       device [
         DEF lh_left_motor RotationalMotor {
-          name "lh_left_motor"
+          name "D_Module_L_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "lh_left_motor_sensor"
+          name "D_Module_L_Motor_sensor"
         }
       ]
       endPoint DEF LH_lmotorbar Solid {
@@ -2335,18 +2335,18 @@ DEF CORGI Robot {
     DEF RF_Rmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position 4.2219973624926454e-08
-        axis 0 0 1
+        axis 0 0 -1
         anchor 0.222 0 0.2
       }
       device [
         DEF rf_right_motor RotationalMotor {
-          name "rf_right_motor"
+          name "B_Module_R_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "rf_right_motor_sensor"
+          name "B_Module_R_Motor_sensor"
         }
       ]
       endPoint DEF RF_rmotorbar Solid {
@@ -2482,18 +2482,18 @@ DEF CORGI Robot {
     DEF RF_Lmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position -4.570076139742696e-08
-        axis 0 0 1
+        axis 0 0 -1
         anchor 0.222 0 0.2
       }
       device [
         DEF rf_left_motor RotationalMotor {
-          name "rf_left_motor"
+          name "B_Module_L_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "rf_left_motor_sensor"
+          name "B_Module_L_Motor_sensor"
         }
       ]
       endPoint DEF RF_lmotorbar Solid {
@@ -2623,18 +2623,18 @@ DEF CORGI Robot {
     DEF RH_Rmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position 4.2220062403359316e-08
-        axis 0 0 1
+        axis 0 0 -1
         anchor -0.222 0 0.2
       }
       device [
         DEF rh_right_motor RotationalMotor {
-          name "rh_right_motor"
+          name "C_Module_R_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "rh_right_motor_sensor"
+          name "C_Module_R_Motor_sensor"
         }
       ]
       endPoint DEF RH_rmotorbar Solid {
@@ -2770,18 +2770,18 @@ DEF CORGI Robot {
     DEF RH_Lmotorbar HingeJoint {
       jointParameters HingeJointParameters {
         position -4.570070083754034e-08
-        axis 0 0 1
+        axis 0 0 -1
         anchor -0.222 0 0.2
       }
       device [
         DEF rh_left_motor RotationalMotor {
-          name "rh_left_motor"
+          name "C_Module_L_Motor"
           controlPID 30 0 0.1
           maxVelocity 31.4
           maxTorque 35
         }
         PositionSensor {
-          name "rh_left_motor_sensor"
+          name "C_Module_L_Motor_sensor"
         }
       ]
       endPoint DEF RH_lmotorbar Solid {
@@ -2918,8 +2918,8 @@ DEF CORGI Robot {
     ]
   }
 
-  name "CORGI"
-  controller "corgi_ros2"
+  name "CorgiRobot"
+  controller "<extern>"
   supervisor TRUE
 }
 SolidBox {

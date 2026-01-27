@@ -112,6 +112,9 @@ class LegManager:
         # 當前速度（用於狀態發布，避免重複計算）
         self.current_vel_l = 0.0
         self.current_vel_r = 0.0
+        # 扭矩命令存儲（用於發布命令值）
+        self.cmd_trq_l = 0.0
+        self.cmd_trq_r = 0.0
         self.basic_time_step = basic_time_step
         self.Max_Torque = Max_Torque
         
@@ -192,6 +195,10 @@ class LegManager:
         trq_r = kp_r * err_r + kd_r * (-vel_r) + torque_r * 1 if err_r else -1
         trq_l = kp_l * err_l + kd_l * (-vel_l) + torque_l * 1 if err_l else -1
         
+        # 保存扭矩命令
+        self.cmd_trq_r = trq_r
+        self.cmd_trq_l = trq_l
+        
         # 設定扭矩到 Webots 馬達
         if "R_Motor" in self.motors:
             if trq_r > self.Max_Torque:
@@ -220,24 +227,6 @@ class LegManager:
         """
         diff = (phi_target - phi_current + math.pi) % (2 * math.pi) - math.pi
         return phi_current + diff
-    
-    def get_positions(self):
-        positions = {}
-        for name, sensor in self.sensors.items():
-            positions[self.prefix + name] = sensor.getValue()
-        return positions
-    
-    def get_velocities(self):
-        velocities = {}
-        for name, motor in self.motors.items():
-            velocities[self.prefix + name] = motor.getVelocity()
-        return velocities
-    
-    def get_torques(self):
-        torques = {}
-        for name, motor in self.motors.items():
-            torques[self.prefix + name] = motor.getTorqueFeedback()
-        return torques
       
     def get_states(self):
         pos_l = self.sensors["L_Motor"].getValue()
@@ -251,8 +240,9 @@ class LegManager:
         msg.velocity_l = self.current_vel_l
         msg.velocity_r = self.current_vel_r
         
-        msg.torque_r = self.motors["R_Motor"].getTorqueFeedback()
-        msg.torque_l = self.motors["L_Motor"].getTorqueFeedback()
+        # 發布扭矩命令值（命令扭矩，而非回饋）
+        msg.torque_r = self.cmd_trq_r
+        msg.torque_l = self.cmd_trq_l
         return msg
     
 class CorgiDriver:

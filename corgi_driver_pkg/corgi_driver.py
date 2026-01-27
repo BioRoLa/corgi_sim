@@ -184,9 +184,13 @@ class LegManager:
         cmd_R = self._find_closest_phi(cmd_R, pos_r)
         cmd_L = self._find_closest_phi(cmd_L, pos_l)
         
+        # 計算位置誤差（避免在扭矩計算中重複計算）
+        err_l = cmd_L - pos_l
+        err_r = cmd_R - pos_r
+        
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
-        trq_r = kp_r * (cmd_R - pos_r) + kd_r * (-vel_r) + torque_r * 1 if (cmd_R - pos_r) else -1
-        trq_l = kp_l * (cmd_L - pos_l) + kd_l * (-vel_l) + torque_l * 1 if (cmd_L - pos_l) else -1
+        trq_r = kp_r * err_r + kd_r * (-vel_r) + torque_r * 1 if err_r else -1
+        trq_l = kp_l * err_l + kd_l * (-vel_l) + torque_l * 1 if err_l else -1
         
         # 設定扭矩到 Webots 馬達
         if "R_Motor" in self.motors:
@@ -201,10 +205,13 @@ class LegManager:
             elif trq_l < -self.Max_Torque:
                 trq_l = -self.Max_Torque
             self.motors["L_Motor"].setTorque(trq_l)
+        
         # print debug info
         return "".join([f"[{self.prefix}] Target θ: {theta:.3f} rad, β: {beta:.3f} rad | ",
                                       f"Cmd L: {cmd_L:.3f} rad, R: {cmd_R:.3f} rad | ",
                                       f"Pos L: {pos_l:.3f} rad, R: {pos_r:.3f} rad | ",
+                                      f"Err L: {err_l:.3f} rad, R: {err_r:.3f} rad | ",
+                                      f"Vel L: {vel_l:.3f} rad/s, R: {vel_r:.3f} rad/s | ",
                                       f"Trq L: {trq_l:.3f} Nm, R: {trq_r:.3f} Nm"])
     
     def _find_closest_phi(self, phi_target, phi_current):
@@ -307,7 +314,7 @@ class CorgiDriver:
             MotorCmdStamped,
             'motor/command',
             self.cb_motor,
-            1000
+            1
         )
         # Latest received command
         self.latest_command = None
@@ -322,14 +329,14 @@ class CorgiDriver:
         self.motor_state_pub = self.__node.create_publisher(
             MotorStateStamped,
             'motor/state',
-            1000
+            1
         )
         
         # FSM publisher
         self.fsm_pub = self.__node.create_publisher(
             RobotStateStamped,
             'robot/state',
-            1000
+            1
         )
         
         # Initialize loop counter

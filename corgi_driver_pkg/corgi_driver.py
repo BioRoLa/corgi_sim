@@ -109,6 +109,9 @@ class LegManager:
         self.prev_pos_r = None
         self.prev_vel_l = 0.0
         self.prev_vel_r = 0.0
+        # 當前速度（用於狀態發布，避免重複計算）
+        self.current_vel_l = 0.0
+        self.current_vel_r = 0.0
         self.basic_time_step = basic_time_step
         self.Max_Torque = Max_Torque
         
@@ -153,7 +156,7 @@ class LegManager:
         # 讀取當前馬達狀態
         pos_r = self.sensors["R_Motor"].getValue()
         pos_l = self.sensors["L_Motor"].getValue()
-        alpha = 0.1  # 低通濾波係數
+        alpha = 1  # 低通濾波係數
         
         # 初始化前一時刻的位置
         if self.prev_pos_r is None:
@@ -168,11 +171,14 @@ class LegManager:
         # 速度低通濾波
         vel_r = alpha * vel_r + (1 - alpha) * self.prev_vel_r
         vel_l = alpha * vel_l + (1 - alpha) * self.prev_vel_l
-        # 更新歷史位置
+        # 更新歷史位置和速度
         self.prev_pos_r = pos_r
         self.prev_pos_l = pos_l
         self.prev_vel_r = vel_r
         self.prev_vel_l = vel_l
+        # 保存當前速度供get_states使用，避免重複計算
+        self.current_vel_l = vel_l
+        self.current_vel_r = vel_r
         
         # 處理角度連續性（避免 ±π 跳變）
         cmd_R = self._find_closest_phi(cmd_R, pos_r)
@@ -229,19 +235,15 @@ class LegManager:
     def get_states(self):
         pos_l = self.sensors["L_Motor"].getValue()
         pos_r = self.sensors["R_Motor"].getValue()
-        if self.prev_pos_l is None:
-            self.prev_pos_l = pos_l
-        if self.prev_pos_r is None:
-            self.prev_pos_r = pos_r
-        vel_l = (pos_l - self.prev_pos_l) / self.basic_time_step * 1000.0
-        vel_r = (pos_r - self.prev_pos_r) / self.basic_time_step * 1000.0
-        self.prev_pos_l = pos_l
-        self.prev_pos_r = pos_r
+        
         msg = MotorState()
-        theta, beta = self.tb.FK(pos_l,pos_r)
-        msg.theta , msg.beta = theta, beta
-        msg.velocity_r = vel_r
-        msg.velocity_l = vel_l
+        theta, beta = self.tb.FK(pos_l, pos_r)
+        msg.theta, msg.beta = theta, beta
+        
+        # 直接使用set_target中計算的速度（已經過濾波）
+        msg.velocity_l = self.current_vel_l
+        msg.velocity_r = self.current_vel_r
+        
         msg.torque_r = self.motors["R_Motor"].getTorqueFeedback()
         msg.torque_l = self.motors["L_Motor"].getTorqueFeedback()
         return msg
@@ -277,9 +279,9 @@ class CorgiDriver:
         
         # Fixed PID parameters (not using ROS2 parameter)
         # TUNED Params
-        self.KP = 1000
+        self.KP = 90.0
         self.KI = 0.0
-        self.KD = 1
+        self.KD = 1.75
         # self.Max_Torque = self.KP if self.KP > 35.0 else 35.0
         self.Max_Torque = 35.0
         self.trq_feedforward = 0  # N·m 前饋扭矩

@@ -178,7 +178,6 @@ class LegManager:
         cmd_R = self._find_closest_phi(cmd_R, pos_r)
         cmd_L = self._find_closest_phi(cmd_L, pos_l)
         
-        # === ROS1 corgi_sim_trq.cpp Line 115-116 控制律 ===
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
         trq_r = kp_r * (cmd_R - pos_r) + kd_r * (-vel_r) + torque_r * 1 if (cmd_R - pos_r) else -1
         trq_l = kp_l * (cmd_L - pos_l) + kd_l * (-vel_l) + torque_l * 1 if (cmd_L - pos_l) else -1
@@ -308,8 +307,8 @@ class CorgiDriver:
             self.cb_motor,
             1000
         )
-        # Received commands from motor callback
-        self.received_commands = []
+        # Latest received command
+        self.latest_command = None
         
         
         # Default position when no message received
@@ -331,8 +330,8 @@ class CorgiDriver:
             1000
         )
         
-        # Initialize executing index for ROS control
-        self.executing_index = 0
+        # Initialize loop counter
+        self.loop_counter = 0
         self.__node.get_logger().info("Driver Initialized!")
         
         # Pause simulation at the beginning
@@ -383,13 +382,15 @@ class CorgiDriver:
             "D_torque_r": msg.module_d.torque_r,
             "D_torque_l": msg.module_d.torque_l,
         }
-        # Add to received commands list
-        self.received_commands += [CMDS.copy()]
+        # Update latest command
+        self.latest_command = CMDS.copy()
         
     def execute_motor(self):
         
-        if self.executing_index < len(self.received_commands):
-            cmd = self.received_commands[self.executing_index]
+        # Use latest_command if available, otherwise do nothing (motors will keep their state).
+        cmd = self.latest_command
+
+        if cmd:
             # 處理四腿目標（使用固定 PID 參數）
             motor_debug_msg = "\n"
             motor_debug_msg += self.legs['A'].set_target(
@@ -424,47 +425,9 @@ class CorgiDriver:
             self.__node.get_logger().debug(
                 motor_debug_msg
             )
-            
-            self.executing_index += 1
-            
-        elif self.executing_index == len(self.received_commands) and self.executing_index:
-            # keep the last command
-            cmd = self.received_commands[self.executing_index - 1]
-            motor_debug_msg = "\n"
-            motor_debug_msg += self.legs['A'].set_target(
-                cmd["A_Theta"], -cmd["A_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["A_torque_r"], cmd["A_torque_l"]
-            )
-            motor_debug_msg += "\n"
-            motor_debug_msg += self.legs['B'].set_target(
-                cmd["B_Theta"], -cmd["B_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["B_torque_r"], cmd["B_torque_l"]
-            )
-            motor_debug_msg += "\n"
-            motor_debug_msg += self.legs['C'].set_target(
-                cmd["C_Theta"], -cmd["C_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["C_torque_r"], cmd["C_torque_l"]
-            )
-            motor_debug_msg += "\n"
-            motor_debug_msg += self.legs['D'].set_target(
-                cmd["D_Theta"], -cmd["D_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["D_torque_r"], cmd["D_torque_l"]
-            )
-            
-            self.__node.get_logger().debug(
-                motor_debug_msg
-            )
-            
+
         else:
-            # 未收到訊息時使用預設位置 theta=0, beta=0
+            # If no command has ever been received, set to default position
             self.legs['A'].set_target(
                 self.default_theta, self.default_beta,
                 self.KP, self.KP,
@@ -525,7 +488,7 @@ class CorgiDriver:
         time_stamp = Time()
         time_stamp.sec = int(self.__robot.getTime())
         time_stamp.nanosec = int((self.__robot.getTime() - int(self.__robot.getTime())) * 1e9)
-        imu_msg = self.imu_sensor.get_msg(time_stamp, self.executing_index)
+        imu_msg = self.imu_sensor.get_msg(time_stamp, self.loop_counter)
         self.imu_sensor.imu_pub.publish(imu_msg)
     
     def pub_clock(self):
@@ -551,7 +514,7 @@ class CorgiDriver:
     
     def pub_motor_state(self):
         motor_state_msg = MotorStateStamped()
-        motor_state_msg.header.seq = self.executing_index
+        motor_state_msg.header.seq = self.loop_counter
         motor_state_msg.header.stamp = self.ros_time_msg
         # 取得所有馬達狀態
         motor_state_msg.module_a = self.legs['A'].get_states()
@@ -563,7 +526,7 @@ class CorgiDriver:
     def pub_fsm(self):
         """Publish robot state with standby mode"""
         fsm_msg = RobotStateStamped()
-        fsm_msg.header.seq = self.executing_index
+        fsm_msg.header.seq = self.loop_counter
         fsm_msg.header.stamp = self.ros_time_msg
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
@@ -588,3 +551,5 @@ class CorgiDriver:
         self.pub_imu()
         # FSM
         self.pub_fsm()
+        
+        self.loop_counter += 1

@@ -10,11 +10,14 @@ from builtin_interfaces.msg import Time
 from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import Quaternion
 from geometry_msgs.msg import Vector3
+from geometry_msgs.msg import Point
 from tf2_ros import TransformBroadcaster
 from corgi_msgs.msg import MotorCmdStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
 from corgi_msgs.msg import RobotStateStamped
+from corgi_msgs.msg import SimContactPoint
+
 
 from . import Controller_TB
 
@@ -328,6 +331,22 @@ class CorgiDriver:
             'robot/state',
             1
         )
+
+        # # Contact Leg Publisher
+        # self.contact_leg_pub = self.__node.create_publisher(
+        #     SimContactPoint, #FIXME: change msg type
+        #     'sim/contact_legs',
+        #     1
+        # )
+
+        # Enable contact point tracking
+        if self.__self_node:
+            # 啟用接觸點追蹤，包含所有子節點
+            self.__self_node.enableContactPointsTracking(
+                samplingPeriod=self.__timestep,
+                includeDescendants=True
+            )
+            self.__node.get_logger().info("Contact point tracking enabled")
         
         # Initialize loop counter
         self.loop_counter = 0
@@ -529,6 +548,44 @@ class CorgiDriver:
         fsm_msg.header.stamp = self.ros_time_msg
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
+
+    def pub_contact_legs(self):
+
+        if not self.__self_node:
+            return
+        
+        contact_points = self.__self_node.getContactPoints(includeDescendants=True)
+        if contact_points:
+            for cp in contact_points:
+
+                node_id = cp.node_id
+                contact_node = self.__robot.getFromId(node_id)
+
+                if contact_node:
+
+                    contact_msg = SimContactPoint()
+
+                    try:
+                        contact_msg.def_name = contact_node.getDef()
+                    except:
+                        contact_msg.def_name = ""
+
+                    try:
+                        name_field = contact_node.getField("name")
+                        if name_field:
+                            contact_msg.name = name_field.getSFString()
+                        else:
+                            contact_msg.name = ""
+                    except:
+                        contact_msg.name = ""
+                    
+                    contact_msg.point = Point(
+                        x=cp.point[0],
+                        y=cp.point[1],
+                        z=cp.point[2]
+                    )   
+
+                    self.__node.get_logger().info(f"Contact with {contact_msg.def_name} at point ({contact_msg.point.x}, {contact_msg.point.y}, {contact_msg.point.z})")
     
     # Webots main loop, Webots will call this function
     def step(self):

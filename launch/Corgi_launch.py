@@ -29,9 +29,18 @@ def generate_launch_description():
         respawn=True    #maintain connection if Webots restarts
     )
 
+    # 4. 啟動 Corgi 控制面板
+    control_panel = Node(
+        package='corgi_panel',
+        executable='corgi_control_panel',
+        parameters=[{'use_sim_time': True}],
+        output='screen'
+    )
+
     return LaunchDescription([
         webots,
         robot_driver,
+        control_panel,
         launch.actions.RegisterEventHandler(
             event_handler=launch.event_handlers.OnProcessExit(
                 target_action=webots,

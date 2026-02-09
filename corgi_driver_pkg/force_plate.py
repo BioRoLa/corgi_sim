@@ -5,13 +5,13 @@ import os
 class ForcePlateDriver:
     def __init__(self, webots_node=None, properties=None):
         # Support both plugin mode (webots_node) and standalone mode
-        self.robot = webots_node if webots_node is not None else Robot()
+        self.robot = webots_node.robot if webots_node is not None else Robot()
         self.timestep = int(self.robot.getBasicTimeStep())
         self.force_plates = [self.robot.getDevice(f'force_plate_{i}') for i in range(1, 5)]
         for plate in self.force_plates:
             plate.enable(self.timestep)
         
-        self.csv_path = os.path.join(os.getenv('HOME'), 'corgi_ws/corgi_ros_ws/output_data/sim_force_plate.csv')
+        self.csv_path = os.path.join(os.getenv('HOME'), 'corgi_ws/corgi_ros2_ws/output_data/sim_force_plate.csv')
         self._initialize_csv()
         
     def _initialize_csv(self):

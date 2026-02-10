@@ -18,7 +18,7 @@ def generate_launch_description():
         ros2_supervisor=False
     )
 
-    # 3. 啟動機器人控制器 (ROS 2 Bridge)
+    # 3. 啟動機器人控制器 (CorgiRobot)
     robot_driver = WebotsController(
         robot_name='CorgiRobot', # 必須對應 PROTO 的 name
         parameters=[
@@ -29,9 +29,9 @@ def generate_launch_description():
         respawn=True    #maintain connection if Webots restarts
     )
     
-    # 4. [新增] 啟動 Force Plate 控制器
-    # 注意：在 .wbt 檔案中，你的 ForcePlate 物件必須將 controller 設為 <extern>
-    # 且 name 必須設為 'ForcePlate' (或其他你想要的名字，需與下方一致)
+    # 4. 啟動 Force Plate 控制器
+    # 注意：在 .wbt 檔案中，你的 Force Plate 物件必須將 controller 設為 <extern>
+    # 且 name 必須設為 'Force Plate'
     force_plate_driver = WebotsController(
         robot_name='Force Plate', # 對應 .wbt 中 ForcePlate 的 name
         parameters=[

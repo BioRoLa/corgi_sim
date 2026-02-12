@@ -234,7 +234,7 @@ class LegManager:
         
         msg = MotorState()
         theta, beta = self.tb.FK(pos_l, pos_r)
-        msg.theta, msg.beta = theta, beta
+        msg.theta, msg.beta = theta, -beta
         
         # 直接使用set_target中計算的速度（已經過濾波）
         msg.velocity_l = self.current_vel_l

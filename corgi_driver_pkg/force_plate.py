@@ -1,56 +1,106 @@
+import rclpy
+from rclpy.node import Node
+from geometry_msgs.msg import WrenchStamped
+from builtin_interfaces.msg import Time
 from controller import Robot
-import csv
-import os
 
 class ForcePlateDriver:
-    def __init__(self, webots_node=None, properties=None):
-        # Support both plugin mode (webots_node) and standalone mode
-        self.robot = webots_node.robot if webots_node is not None else Robot()
-        self.timestep = int(self.robot.getBasicTimeStep())
-        self.force_plates = [self.robot.getDevice(f'force_plate_{i}') for i in range(1, 5)]
-        for plate in self.force_plates:
-            plate.enable(self.timestep)
-        
-        self.csv_path = os.path.join(os.getenv('HOME'), 'corgi_ws/corgi_ros2_ws/output_data/sim_force_plate.csv')
-        self._initialize_csv()
-        
-    def _initialize_csv(self):
-        """Initialize CSV file with header columns"""
-        columns = [f'{axis}_{i}' for i in range(1, 5) for axis in ['Fx', 'Fy', 'Fz']]
-        
-        for label in ['O1', 'O2', 'O3', 'O4', 'Trigger']:
-            columns.extend([f'{label}_x', f'{label}_y', f'{label}_z'])
-            
-        columns.extend(['vicon_pos_x', 'vicon_pos_z', 'vicon_vel_x', 'vicon_vel_z', 'vicon_roll', 'vicon_pitch'])
-        
-        with open(self.csv_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(columns)
-    
-    def step(self):
-        """Collect force plate data and write to CSV"""
-        row = [value for plate in self.force_plates for value in plate.getValues()[:3]]
-        
-        for i in range(len(self.force_plates)):
-            row[i*3+2] -= 9.81
-            row[i*3+2] *= -1
-        
-        with open(self.csv_path, 'a', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(row)
-    
-    def run(self):
-        """Main loop for standalone execution"""
-        while self.robot.step(self.timestep) != -1:
-            self.step()
+    def init(self, webots_node, properties):
+        """
+        Initialize the ROS 2 node and Force Plate sensors.
+        Referencing the structure from corgi_driver.py.
+        """
+        # 1. Get Webots robot instance
+        self.__robot = webots_node.robot
+        self.__timestep = int(self.__robot.getBasicTimeStep())
 
+        # 2. Initialize ROS 2 Node
+        # Check if rclpy is already initialized
+        if not rclpy.ok():
+            rclpy.init(args=None)
+        
+        self.__node = rclpy.create_node('force_plate_driver')
+        
+        # 3. Initialize Sensors and Publishers
+        # We have 4 force plates, creating a publisher for each
+        self.force_plates = []
+        self.publishers = []
+        
+        for i in range(1, 5):
+            # Webots Device
+            plate_name = f'force_plate_{i}'
+            plate = self.__robot.getDevice(plate_name)
+            if plate:
+                plate.enable(self.__timestep)
+                self.force_plates.append(plate)
+                
+                # ROS 2 Publisher
+                pub = self.__node.create_publisher(
+                    WrenchStamped, 
+                    f'sensor/{plate_name}', 
+                    10
+                )
+                self.publishers.append(pub)
+            else:
+                self.__node.get_logger().error(f"Sensor {plate_name} not found!")
+
+        self.__node.get_logger().info("Force Plate Driver Initialized with ROS 2 Topics!")
+
+    def step(self):
+        """
+        Main step function called by Webots.
+        Reads sensor data and publishes to ROS 2.
+        """
+        # 1. Process ROS 2 events (if any)
+        rclpy.spin_once(self.__node, timeout_sec=0)
+        
+        # 2. Get current simulation time for timestamping
+        now = self.__robot.getTime()
+        stamp = Time()
+        stamp.sec = int(now)
+        stamp.nanosec = int((now - int(now)) * 1e9)
+        
+        # 3. Read sensor data and publish
+        for i, plate in enumerate(self.force_plates):
+            # getValues() retrun [Fx, Fy, Fz]
+            values = plate.getValues() 
+
+            # Create msg WrenchStamped 
+            msg = WrenchStamped()
+            msg.header.stamp = stamp
+            msg.header.frame_id = f'force_plate_{i+1}'
+            
+            msg.wrench.force.x = values[0]
+            msg.wrench.force.y = values[1]
+            msg.wrench.force.z = -(values[2] - 9.81)
+            
+            msg.wrench.torque.x = 0.0
+            msg.wrench.torque.y = 0.0
+            msg.wrench.torque.z = 0.0
+            
+            # Publish to Topic
+            self.publishers[i].publish(msg)
 
 def main(args=None):
-    """Entry point for ROS2 node"""
+    # Standalone execution support
+    if not rclpy.ok():
+        rclpy.init(args=args)
+    
+    # In standalone mode, we need a robot instance
+    robot = Robot()
     driver = ForcePlateDriver()
-    driver.run()
+    
+    # Mocking the webots_node object for standalone compatibility
+    class MockWebotsNode:
+        def __init__(self, robot):
+            self.robot = robot
+            
+    driver.init(MockWebotsNode(robot), None)
+    
+    while robot.step(int(robot.getBasicTimeStep())) != -1:
+        driver.step()
+    
+    rclpy.shutdown()
 
 if __name__ == "__main__":
-    driver = ForcePlateDriver()
-    driver.run()
-
+    main()

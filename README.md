@@ -65,6 +65,8 @@ source install/setup.bash
 
 ### 2. Launch Simulation
 
+**Important:** If running simulation in WSL2, use windows Webots version and ensure dns Tunneling is disabled in WSL2 config.
+
 ```bash
 ros2 launch corgi_sim Corgi_launch.py
 ```

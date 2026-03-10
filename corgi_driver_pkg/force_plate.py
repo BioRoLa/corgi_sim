@@ -38,7 +38,7 @@ class ForcePlateDriver:
                 pub = self.__node.create_publisher(
                     WrenchStamped, 
                     f'sensor/{plate_name}', 
-                    10
+                    1
                 )
                 self.publishers.append(pub)
             else:

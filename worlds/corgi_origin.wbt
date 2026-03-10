@@ -8,6 +8,8 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/project
 
 WorldInfo {
   basicTimeStep 1
+  FPS 24
+  optimalThreadCount 4
 }
 Viewpoint {
   orientation -0.23142759527953982 0.201381352074196 0.951780867206259 1.7581894093481225

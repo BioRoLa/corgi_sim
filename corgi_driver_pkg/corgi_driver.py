@@ -340,17 +340,20 @@ class CorgiDriver:
             1
         )
 
-        # Enable contact point tracking
-        if self.__self_node:
-            # 啟用接觸點追蹤，包含所有子節點
-            self.__self_node.enableContactPointsTracking(
-                samplingPeriod=self.__timestep,
-                includeDescendants=True
-            )
-            self.__node.get_logger().info("Contact point tracking enabled")
-        
-        # 6. RIM name cache for contact classification {node_id: solid_name}
-        self._rim_name_cache = {}
+        # Enable 16 TouchSensor bumpers (one per RIM frame)
+        self._bumper_sensors = {}  # (module, rim_field) → TouchSensor
+        for m in 'ABCD':
+            for frame, rim in [('Low_Frame_L', 'rim_ll'), ('Up_Frame_L', 'rim_ul'),
+                               ('Low_Frame_R', 'rim_lr'), ('Up_Frame_R', 'rim_ur')]:
+                dev_name = f"{m}_{frame}"
+                sensor = self.__robot.getDevice(dev_name)
+                if sensor:
+                    sensor.enable(self.__timestep)
+                    self._bumper_sensors[(m, rim)] = sensor
+                else:
+                    self.__node.get_logger().warn(f"TouchSensor '{dev_name}' not found")
+        self.__node.get_logger().info(
+            f"Bumper sensors enabled: {len(self._bumper_sensors)}/16")
 
         # Initialize loop counter
         self.loop_counter = 0
@@ -553,115 +556,10 @@ class CorgiDriver:
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
 
-    # --- Contact detection helpers ---
-
-    # RIM name → bool field mapping
-    _RIM_MAP = {
-        "Up_Frame_L":  "rim_ul",  # RIM 1
-        "Low_Frame_L": "rim_ll",  # RIM 2
-        "Low_Frame_R": "rim_lr",  # RIM 4
-        "Up_Frame_R":  "rim_ur",  # RIM 5
-    }
-
-    # Module centers in robot-local XY frame (from CorgiRobot.proto)
-    _MODULE_CENTERS = {
-        'A': (0.22,  0.2),
-        'B': (0.22, -0.2),
-        'C': (-0.22, -0.2),
-        'D': (-0.22,  0.2),
-    }
-
-    # Max XY distance (m) from module center in robot-local frame.
-    # Rejects chassis/body contacts that are far from all leg modules.
-    # Module bounding sphere = 0.1 m; leg RIM reaches ~0.15 m; threshold = 0.18 m.
-    _MODULE_RADIUS = 0.18
-
-    # World-Z threshold (m) to distinguish Up_Frame (obstacle/stair contact)
-    # from Low_Frame (floor contact). Floor contacts have world Z ≈ 0;
-    # stair/obstacle contacts are elevated. Tune as needed.
-    _UP_LOW_Z_THRESHOLD = 0.03
-
-    def _classify_contact(self, cp):
-        """Classify a contact point to (module_letter, rim_field_name|None).
-
-        Module  → nearest module center in robot-local XY, within _MODULE_RADIUS.
-                  Returns (None, None) for contacts too far from every module
-                  (e.g. chassis/body touching the floor).
-        RIM     → geometric classification from contact position:
-                  L/R  : sign of (contact_ly - module_center_ly)
-                         positive → Left (L) frame, negative → Right (R) frame
-                  Up/Low: world-Z of contact point
-                         < _UP_LOW_Z_THRESHOLD → Low_Frame (floor contact)
-                         >= _UP_LOW_Z_THRESHOLD → Up_Frame (obstacle/stair contact)
-        """
-        # --- Module from contact position ---
-        module = None
-        try:
-            robot_pos = self.__self_node.getPosition()   # [x, y, z]
-            rot = self.__self_node.getOrientation()      # 9-element row-major 3x3
-            dx = cp.point[0] - robot_pos[0]
-            dy = cp.point[1] - robot_pos[1]
-            dz = cp.point[2] - robot_pos[2]
-            # R^T * delta → robot-local frame (all 3 axes)
-            lx = rot[0]*dx + rot[3]*dy + rot[6]*dz
-            ly = rot[1]*dx + rot[4]*dy + rot[7]*dz
-            lz = rot[2]*dx + rot[5]*dy + rot[8]*dz
-            best_dist_sq = float('inf')
-            best_mod = None
-            for mod, (mx, my) in self._MODULE_CENTERS.items():
-                d_sq = (lx - mx)**2 + (ly - my)**2
-                if d_sq < best_dist_sq:
-                    best_dist_sq = d_sq
-                    best_mod = mod
-            # Reject if farther than threshold (not a leg contact)
-            if best_dist_sq > self._MODULE_RADIUS ** 2:
-                return None, None
-            module = best_mod
-        except Exception:
-            return None, None
-
-        # --- Reject robot chassis contacts (node_id resolves to robot root) ---
-        try:
-            nid = cp.node_id
-            cached = self._rim_name_cache.get(nid)
-            if cached is None:
-                n = self.__robot.getFromId(nid)
-                cached = ""
-                if n:
-                    f = n.getField("name")
-                    cached = f.getSFString() if f else ""
-                self._rim_name_cache[nid] = cached
-                # Log once per unique ID for diagnosis
-                self.__node.get_logger().info(
-                    f"[contact_geom] module={module} node_id={nid}"
-                    f" lx={lx:.3f} ly={ly:.3f} lz={lz:.3f}"
-                    f" world_z={cp.point[2]:.3f} node_name='{cached}'")
-            if cached == "CorgiRobot":
-                return None, None
-        except Exception:
-            pass
-
-        # --- Geometric RIM classification ---
-        # L/R: contact local-Y relative to module center Y
-        _, my = self._MODULE_CENTERS[module]
-        is_left = (ly - my) >= 0   # True → L frame
-
-        # Up/Low: world Z of contact point
-        # Floor contacts (Low_Frame) are near Z=0; obstacle contacts (Up_Frame) are elevated
-        is_up = cp.point[2] >= self._UP_LOW_Z_THRESHOLD
-
-        if is_up:
-            rim_field = "rim_ul" if is_left else "rim_ur"
-        else:
-            rim_field = "rim_ll" if is_left else "rim_lr"
-
-        return module, rim_field
+    # --- Contact detection via Supervisor contact points ---
 
     def pub_contact_state(self):
-        """Detect per-leg contact state using Webots contact points and publish."""
-        if not self.__self_node:
-            return
-
+        """Read 16 TouchSensor bumpers and publish per-leg contact state."""
         leg_msgs = {
             'A': SimLegContact(),
             'B': SimLegContact(),
@@ -669,15 +567,10 @@ class CorgiDriver:
             'D': SimLegContact(),
         }
 
-        contact_points = self.__self_node.getContactPoints(includeDescendants=True)
-        if contact_points:
-            for cp in contact_points:
-                module, rim_field = self._classify_contact(cp)
-                if module is None:
-                    continue
+        for (module, rim_field), sensor in self._bumper_sensors.items():
+            if sensor.getValue() > 0.5:
                 leg_msgs[module].contact = True
-                if rim_field:
-                    setattr(leg_msgs[module], rim_field, True)
+                setattr(leg_msgs[module], rim_field, True)
 
         msg = SimLegContactStamped()
         msg.header.seq = self.loop_counter
@@ -710,7 +603,7 @@ class CorgiDriver:
                         contact_msg.def_name = ""
 
                     try:
-                        name_field = contact_node.getField("name")
+                        name_field = contact_node.getField("name") or contact_node.getBaseNodeField("name")
                         if name_field:
                             contact_msg.name = name_field.getSFString()
                         else:

@@ -284,7 +284,6 @@ class CorgiDriver:
         self.KD = 1.75
         # self.Max_Torque = self.KP if self.KP > 35.0 else 35.0
         self.Max_Torque = 35.0
-        self.trq_feedforward = 0  # N·m 前饋扭矩
         
         # 3. initialize Legs
         self.tb_lib = Controller_TB.Controller_TB(theta_0=math.radians(17))
@@ -421,28 +420,28 @@ class CorgiDriver:
                 cmd["A_Theta"], cmd["A_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
-                cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
+                cmd["A_torque_r"], cmd["A_torque_l"]
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], cmd["B_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
-                cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
+                cmd["B_torque_r"], cmd["B_torque_l"]
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], cmd["C_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
-                cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
+                cmd["C_torque_r"], cmd["C_torque_l"]
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], cmd["D_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
-                cmd["D_torque_r"] + self.trq_feedforward, cmd["D_torque_l"] + self.trq_feedforward
+                cmd["D_torque_r"], cmd["D_torque_l"]
             )
             
             # 顯示扭矩控制參數（使用固定 PID 值）

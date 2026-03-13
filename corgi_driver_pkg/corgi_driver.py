@@ -115,6 +115,9 @@ class LegManager:
         # 當前速度（用於狀態發布，避免重複計算）
         self.current_vel_l = 0.0
         self.current_vel_r = 0.0
+        # 積分項狀態
+        self.int_err_l = 0.0
+        self.int_err_r = 0.0
         # 扭矩命令存儲（用於發布命令值）
         self.cmd_trq_l = 0.0
         self.cmd_trq_r = 0.0
@@ -195,9 +198,19 @@ class LegManager:
         err_l = cmd_L - pos_l
         err_r = cmd_R - pos_r
         
+        # 積分項累積（含 anti-windup 限幅）
+        self.int_err_r += err_r * dt
+        self.int_err_l += err_l * dt
+        if ki_r != 0.0:
+            windup_r = self.Max_Torque / abs(ki_r)
+            self.int_err_r = max(-windup_r, min(windup_r, self.int_err_r))
+        if ki_l != 0.0:
+            windup_l = self.Max_Torque / abs(ki_l)
+            self.int_err_l = max(-windup_l, min(windup_l, self.int_err_l))
+
         # trq = kp * (phi_desired - phi_actual) + ki * integral(err) + kd * (-phi_dot_actual) + torque_ff
-        trq_r = kp_r * err_r + ki_r * err_r * dt + kd_r * (-vel_r) + torque_r
-        trq_l = kp_l * err_l + ki_l * err_l * dt + kd_l * (-vel_l) + torque_l
+        trq_r = kp_r * err_r + ki_r * self.int_err_r + kd_r * (-vel_r) + torque_r
+        trq_l = kp_l * err_l + ki_l * self.int_err_l + kd_l * (-vel_l) + torque_l
         
         # 保存扭矩命令
         self.cmd_trq_r = trq_r

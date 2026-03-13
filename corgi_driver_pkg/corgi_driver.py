@@ -10,11 +10,14 @@ from builtin_interfaces.msg import Time
 from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import Quaternion
 from geometry_msgs.msg import Vector3
+from geometry_msgs.msg import Point
 from tf2_ros import TransformBroadcaster
 from corgi_msgs.msg import MotorCmdStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
 from corgi_msgs.msg import RobotStateStamped
+from corgi_msgs.msg import SimLegContact, SimLegContactStamped
+
 
 from . import Controller_TB
 
@@ -328,7 +331,29 @@ class CorgiDriver:
             'robot/state',
             1
         )
-        
+
+        # Contact Leg Publisher
+        self.leg_contact_pub = self.__node.create_publisher(
+            SimLegContactStamped,
+            'sim/leg_contact',
+            1
+        )
+
+        # Enable 16 TouchSensor bumpers (one per RIM frame)
+        self._bumper_sensors = {}  # (module, rim_field) → TouchSensor
+        for m in 'ABCD':
+            for frame, rim in [('Low_Frame_L', 'rim_ll'), ('Up_Frame_L', 'rim_ul'),
+                               ('Low_Frame_R', 'rim_lr'), ('Up_Frame_R', 'rim_ur')]:
+                dev_name = f"{m}_{frame}"
+                sensor = self.__robot.getDevice(dev_name)
+                if sensor:
+                    sensor.enable(self.__timestep)
+                    self._bumper_sensors[(m, rim)] = sensor
+                else:
+                    self.__node.get_logger().warn(f"TouchSensor '{dev_name}' not found")
+        self.__node.get_logger().info(
+            f"Bumper sensors enabled: {len(self._bumper_sensors)}/16")
+
         # Initialize loop counter
         self.loop_counter = 0
         self.__node.get_logger().info("Driver Initialized!")
@@ -529,6 +554,31 @@ class CorgiDriver:
         fsm_msg.header.stamp = self.ros_time_msg
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
+
+    # --- Contact detection via Supervisor contact points ---
+
+    def pub_contact_state(self):
+        """Read 16 TouchSensor bumpers and publish per-leg contact state."""
+        leg_msgs = {
+            'A': SimLegContact(),
+            'B': SimLegContact(),
+            'C': SimLegContact(),
+            'D': SimLegContact(),
+        }
+
+        for (module, rim_field), sensor in self._bumper_sensors.items():
+            if sensor.getValue() > 0.5:
+                leg_msgs[module].contact = True
+                setattr(leg_msgs[module], rim_field, True)
+
+        msg = SimLegContactStamped()
+        msg.header.seq = self.loop_counter
+        msg.header.stamp = self.ros_time_msg
+        msg.module_a = leg_msgs['A']
+        msg.module_b = leg_msgs['B']
+        msg.module_c = leg_msgs['C']
+        msg.module_d = leg_msgs['D']
+        self.leg_contact_pub.publish(msg)
     
     # Webots main loop, Webots will call this function
     def step(self):
@@ -550,5 +600,7 @@ class CorgiDriver:
         self.pub_imu()
         # FSM
         self.pub_fsm()
+        # Leg Contact State
+        self.pub_contact_state()
         
         self.loop_counter += 1

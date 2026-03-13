@@ -16,7 +16,6 @@ from corgi_msgs.msg import MotorCmdStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
 from corgi_msgs.msg import RobotStateStamped
-from corgi_msgs.msg import SimContactPoint
 from corgi_msgs.msg import SimLegContact, SimLegContactStamped
 
 
@@ -580,47 +579,6 @@ class CorgiDriver:
         msg.module_c = leg_msgs['C']
         msg.module_d = leg_msgs['D']
         self.leg_contact_pub.publish(msg)
-
-    def pub_contact_legs(self):
-        """[Diagnostic] Log raw contact point info."""
-        if not self.__self_node:
-            return
-        
-        contact_points = self.__self_node.getContactPoints(includeDescendants=True)
-        if contact_points:
-            for cp in contact_points:
-
-                node_id = cp.node_id
-                contact_node = self.__robot.getFromId(node_id)
-
-                if contact_node:
-
-                    contact_msg = SimContactPoint()
-
-                    try:
-                        contact_msg.def_name = contact_node.getDef()
-                    except:
-                        contact_msg.def_name = ""
-
-                    try:
-                        name_field = contact_node.getField("name") or contact_node.getBaseNodeField("name")
-                        if name_field:
-                            contact_msg.name = name_field.getSFString()
-                        else:
-                            contact_msg.name = ""
-                    except:
-                        contact_msg.name = ""
-                    
-                    contact_msg.point = Point(
-                        x=cp.point[0],
-                        y=cp.point[1],
-                        z=cp.point[2]
-                    )   
-
-                    self.__node.get_logger().info(
-                        f"Contact node_id={node_id} def='{contact_msg.def_name}' "
-                        f"name='{contact_msg.name}' "
-                        f"at ({contact_msg.point.x:.4f}, {contact_msg.point.y:.4f}, {contact_msg.point.z:.4f})")
     
     # Webots main loop, Webots will call this function
     def step(self):

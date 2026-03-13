@@ -240,12 +240,12 @@ class LegManager:
         msg.theta, msg.beta = theta, -beta
         
         # 直接使用set_target中計算的速度（已經過濾波）
-        msg.velocity_l = self.current_vel_l
-        msg.velocity_r = self.current_vel_r
+        msg.velocity_l = -self.current_vel_l
+        msg.velocity_r = -self.current_vel_r
         
         # 發布扭矩命令值（命令扭矩，而非回饋）
-        msg.torque_r = self.cmd_trq_r
-        msg.torque_l = self.cmd_trq_l
+        msg.torque_r = -self.cmd_trq_r
+        msg.torque_l = -self.cmd_trq_l
         return msg
     
 class CorgiDriver:
@@ -419,29 +419,29 @@ class CorgiDriver:
             motor_debug_msg = "\n"
             motor_debug_msg += self.legs['A'].set_target(
                 cmd["A_Theta"], -cmd["A_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["A_kp_r"], cmd["A_kp_l"],
+                cmd["A_kd_r"], cmd["A_kd_l"],
                 cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], -cmd["B_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["B_kp_r"], cmd["B_kp_l"],
+                cmd["B_kd_r"], cmd["B_kd_l"],
                 cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], -cmd["C_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["C_kp_r"], cmd["C_kp_l"],
+                cmd["C_kd_r"], cmd["C_kd_l"],
                 cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], -cmd["D_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["D_kp_r"], cmd["D_kp_l"],
+                cmd["D_kd_r"], cmd["D_kd_l"],
                 cmd["D_torque_r"] + self.trq_feedforward, cmd["D_torque_l"] + self.trq_feedforward
             )
             

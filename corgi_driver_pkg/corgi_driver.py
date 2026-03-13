@@ -195,8 +195,8 @@ class LegManager:
         err_r = cmd_R - pos_r
         
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
-        trq_r = kp_r * err_r + kd_r * (-vel_r) + torque_r * 1 if err_r else -1
-        trq_l = kp_l * err_l + kd_l * (-vel_l) + torque_l * 1 if err_l else -1
+        trq_r = kp_r * err_r + kd_r * (-vel_r) + torque_r
+        trq_l = kp_l * err_l + kd_l * (-vel_l) + torque_l
         
         # 保存扭矩命令
         self.cmd_trq_r = trq_r
@@ -237,7 +237,7 @@ class LegManager:
         
         msg = MotorState()
         theta, beta = self.tb.FK(pos_l, pos_r)
-        msg.theta, msg.beta = theta, -beta
+        msg.theta, msg.beta = theta, beta
         
         # 直接使用set_target中計算的速度（已經過濾波）
         msg.velocity_l = self.current_vel_l
@@ -418,28 +418,28 @@ class CorgiDriver:
             # 處理四腿目標（使用固定 PID 參數）
             motor_debug_msg = "\n"
             motor_debug_msg += self.legs['A'].set_target(
-                cmd["A_Theta"], -cmd["A_Beta"],
+                cmd["A_Theta"], cmd["A_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
-                cmd["B_Theta"], -cmd["B_Beta"],
+                cmd["B_Theta"], cmd["B_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
-                cmd["C_Theta"], -cmd["C_Beta"],
+                cmd["C_Theta"], cmd["C_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
-                cmd["D_Theta"], -cmd["D_Beta"],
+                cmd["D_Theta"], cmd["D_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["D_torque_r"] + self.trq_feedforward, cmd["D_torque_l"] + self.trq_feedforward

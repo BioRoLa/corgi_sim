@@ -137,7 +137,7 @@ class LegManager:
                 motor.enableTorqueFeedback(self.basic_time_step)
                 motor.setAvailableTorque(self.Max_Torque)
 
-    def set_target(self, theta, beta, kp_r=0.0, kp_l=0.0, kd_r=0.0, kd_l=0.0, torque_r=0.0, torque_l=0.0):
+    def set_target(self, theta, beta, kp_r=0.0, kp_l=0.0, ki_r=0.0, ki_l=0.0, kd_r=0.0, kd_l=0.0, torque_r=0.0, torque_l=0.0):
         """
         設定腿部目標 - 純扭矩控制
         
@@ -145,11 +145,12 @@ class LegManager:
             theta: 腿部伸展角 (rad)
             beta: 腿部旋轉角 (rad)
             kp_r, kp_l: 位置比例增益
+            ki_r, ki_l: 積分增益
             kd_r, kd_l: 速度阻尼增益
             torque_r, torque_l: 前饋扭矩 (N·m)
         
         控制律:
-            τ = kp × (φ_desired - φ_actual) + kd × (-φ̇_actual) + τ_feedforward
+            τ = kp × (φ_desired - φ_actual) + ki × ∫e dt + kd × (-φ̇_actual) + τ_feedforward
         """
         # 限制最小角度
         theta_0 = math.radians(17)
@@ -194,9 +195,9 @@ class LegManager:
         err_l = cmd_L - pos_l
         err_r = cmd_R - pos_r
         
-        # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
-        trq_r = kp_r * err_r + kd_r * (-vel_r) + torque_r
-        trq_l = kp_l * err_l + kd_l * (-vel_l) + torque_l
+        # trq = kp * (phi_desired - phi_actual) + ki * integral(err) + kd * (-phi_dot_actual) + torque_ff
+        trq_r = kp_r * err_r + ki_r * err_r * dt + kd_r * (-vel_r) + torque_r
+        trq_l = kp_l * err_l + ki_l * err_l * dt + kd_l * (-vel_l) + torque_l
         
         # 保存扭矩命令
         self.cmd_trq_r = trq_r
@@ -373,6 +374,8 @@ class CorgiDriver:
             "A_Beta": msg.module_a.beta,
             "A_kp_r": msg.module_a.kp_r,
             "A_kp_l": msg.module_a.kp_l,
+            "A_ki_r": msg.module_a.ki_r,
+            "A_ki_l": msg.module_a.ki_l,
             "A_kd_r": msg.module_a.kd_r,
             "A_kd_l": msg.module_a.kd_l,
             "A_torque_r": msg.module_a.torque_r,
@@ -382,6 +385,8 @@ class CorgiDriver:
             "B_Beta": msg.module_b.beta,
             "B_kp_r": msg.module_b.kp_r,
             "B_kp_l": msg.module_b.kp_l,
+            "B_ki_r": msg.module_b.ki_r,
+            "B_ki_l": msg.module_b.ki_l,
             "B_kd_r": msg.module_b.kd_r,
             "B_kd_l": msg.module_b.kd_l,
             "B_torque_r": msg.module_b.torque_r,
@@ -391,6 +396,8 @@ class CorgiDriver:
             "C_Beta": msg.module_c.beta,
             "C_kp_r": msg.module_c.kp_r,
             "C_kp_l": msg.module_c.kp_l,
+            "C_ki_r": msg.module_c.ki_r,
+            "C_ki_l": msg.module_c.ki_l,
             "C_kd_r": msg.module_c.kd_r,
             "C_kd_l": msg.module_c.kd_l,
             "C_torque_r": msg.module_c.torque_r,
@@ -400,6 +407,8 @@ class CorgiDriver:
             "D_Beta": msg.module_d.beta,
             "D_kp_r": msg.module_d.kp_r,
             "D_kp_l": msg.module_d.kp_l,
+            "D_ki_r": msg.module_d.ki_r,
+            "D_ki_l": msg.module_d.ki_l,
             "D_kd_r": msg.module_d.kd_r,
             "D_kd_l": msg.module_d.kd_l,
             "D_torque_r": msg.module_d.torque_r,
@@ -414,64 +423,72 @@ class CorgiDriver:
         cmd = self.latest_command
 
         if cmd:
-            # 處理四腿目標（使用固定 PID 參數）
+            # 處理四腿目標（使用命令中的 PID 參數）
             motor_debug_msg = "\n"
             motor_debug_msg += self.legs['A'].set_target(
                 cmd["A_Theta"], cmd["A_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["A_kp_r"], cmd["A_kp_l"],
+                cmd["A_ki_r"], cmd["A_ki_l"],
+                cmd["A_kd_r"], cmd["A_kd_l"],
                 cmd["A_torque_r"], cmd["A_torque_l"]
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], cmd["B_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["B_kp_r"], cmd["B_kp_l"],
+                cmd["B_ki_r"], cmd["B_ki_l"],
+                cmd["B_kd_r"], cmd["B_kd_l"],
                 cmd["B_torque_r"], cmd["B_torque_l"]
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], cmd["C_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["C_kp_r"], cmd["C_kp_l"],
+                cmd["C_ki_r"], cmd["C_ki_l"],
+                cmd["C_kd_r"], cmd["C_kd_l"],
                 cmd["C_torque_r"], cmd["C_torque_l"]
             )
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], cmd["D_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
+                cmd["D_kp_r"], cmd["D_kp_l"],
+                cmd["D_ki_r"], cmd["D_ki_l"],
+                cmd["D_kd_r"], cmd["D_kd_l"],
                 cmd["D_torque_r"], cmd["D_torque_l"]
             )
             
-            # 顯示扭矩控制參數（使用固定 PID 值）
+            # 顯示扭矩控制參數（使用命令 PID 值）
             self.__node.get_logger().debug(
                 motor_debug_msg
             )
 
         else:
-            # If no command has ever been received, set to default position
+            # If no command has ever been received, use default targets and initialized PID values
             self.legs['A'].set_target(
                 self.default_theta, self.default_beta,
                 self.KP, self.KP,
+                self.KI, self.KI,
                 self.KD, self.KD,
                 0.0, 0.0
             )
             self.legs['B'].set_target(
                 self.default_theta, self.default_beta,
                 self.KP, self.KP,
+                self.KI, self.KI,
                 self.KD, self.KD,
                 0.0, 0.0
             )
             self.legs['C'].set_target(
                 self.default_theta, self.default_beta,
                 self.KP, self.KP,
+                self.KI, self.KI,
                 self.KD, self.KD,
                 0.0, 0.0
             )
             self.legs['D'].set_target(
                 self.default_theta, self.default_beta,
                 self.KP, self.KP,
+                self.KI, self.KI,
                 self.KD, self.KD,
                 0.0, 0.0
             )

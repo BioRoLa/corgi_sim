@@ -10,7 +10,7 @@ def generate_launch_description():
     package_dir = get_package_share_directory('corgi_sim')
     
     # 1. 設定 Webots 世界檔路徑
-    world_path = os.path.join(package_dir, 'worlds', "IFS_Proto" + ".wbt") # corgi_origin // IFS_Proto
+    world_path = os.path.join(package_dir, 'worlds', "IFS_Proto" + ".wbt") # corgi_origin // IFS_Proto // IFS_Proto_uneven
 
     # 2. 啟動 Webots
     webots = WebotsLauncher(

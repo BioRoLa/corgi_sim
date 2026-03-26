@@ -17,6 +17,7 @@ from corgi_msgs.msg import ImuStamped
 from corgi_msgs.msg import RobotStateStamped
 
 from . import Controller_TB
+from .LegModel import LegModel
 
 class imu:
     def __init__(self, robot, node, basic_time_step=1):
@@ -99,11 +100,13 @@ class imu:
         return msg
 
 class LegManager:
-    def __init__(self, robot, prefix, controller_tb, basic_time_step=1, Max_Torque=35):
+    def __init__(self, robot, prefix, controller_tb, basic_time_step=1, Max_Torque=35,
+                 abad_prefix=None, axis_dir=1):
         self.prefix = prefix
         self.motors = {}
         self.sensors = {}
         self.tb = controller_tb
+        self.axis_dir = axis_dir
         motor_names = ["L_Motor", "R_Motor"]
         self.prev_pos_l = None
         self.prev_pos_r = None
@@ -133,6 +136,29 @@ class LegManager:
                 motor.setVelocity(0.0)           # 初始速度為 0
                 motor.enableTorqueFeedback(self.basic_time_step)
                 motor.setAvailableTorque(self.Max_Torque)
+        
+        # --- ABAD 馬達 (位置控制) ---
+        self.motor_abad = None
+        if abad_prefix:
+            abad_name = f"{abad_prefix}_ABAD"
+            self.motor_abad = robot.getDevice(abad_name)
+            if not self.motor_abad:
+                print(f"Warning: 找不到 ABAD 馬達 {abad_name}")
+        
+        # --- G_Joint 被動追蹤 (透過 LegModel) ---
+        self.motor_g_joint = None
+        self.leg_model = None
+        self.G_Offset = None
+        try:
+            g_joint_name = prefix + "G_Joint"
+            g_joint = robot.getDevice(g_joint_name)
+            if g_joint:
+                self.motor_g_joint = g_joint
+                self.leg_model = LegModel(sim=True)
+                self.leg_model.forward(math.radians(17), 0.0)
+                self.G_Offset = self.leg_model['ang_OGF']
+        except Exception:
+            self.motor_g_joint = None
 
     def set_target(self, theta, beta, kp_r=0.0, kp_l=0.0, kd_r=0.0, kd_l=0.0, torque_r=0.0, torque_l=0.0):
         """
@@ -221,6 +247,29 @@ class LegManager:
                                       f"Vel L: {vel_l:.3f} rad/s, R: {vel_r:.3f} rad/s | ",
                                       f"Trq L: {trq_l:.3f} Nm, R: {trq_r:.3f} Nm"])
     
+    def set_abad(self, gamma):
+        """設定 ABAD 馬達位置 (位置控制)
+        
+        Args:
+            gamma: ABAD 角度 (rad)
+        """
+        if self.motor_abad:
+            self.motor_abad.setPosition(gamma * self.axis_dir)
+    
+    def update_g_joint(self, theta, beta):
+        """根據 theta/beta 更新 G_Joint 被動追蹤
+        
+        Args:
+            theta: 腿部伸展角 (rad)
+            beta: 腿部旋轉角 (rad)
+        """
+        if self.motor_g_joint and self.leg_model:
+            self.leg_model.theta = theta
+            self.leg_model.beta = beta
+            self.leg_model.calculate()
+            g_joint_target = self.leg_model['ang_OGF'] - self.G_Offset
+            self.motor_g_joint.setPosition(g_joint_target)
+    
     def _find_closest_phi(self, phi_target, phi_current):
         """
         找到最接近的等價角度（處理 2π 週期性）
@@ -285,15 +334,21 @@ class CorgiDriver:
         
         # 3. initialize Legs
         self.tb_lib = Controller_TB.Controller_TB(theta_0=math.radians(17))
+        # ABAD axis_dir 設定：與 CSV_Controller_12D 中一致
+        # A(FL): -1, B(FR): 1, C(RR): -1, D(RL): 1
         self.legs = {
             'A': LegManager(self.__robot, "A_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque),
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
+                             abad_prefix='A', axis_dir=-1),
             'B': LegManager(self.__robot, "B_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque),
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
+                             abad_prefix='B', axis_dir=1),
             'C': LegManager(self.__robot, "C_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque),
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
+                             abad_prefix='C', axis_dir=-1),
             'D': LegManager(self.__robot, "D_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque)
+                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
+                             abad_prefix='D', axis_dir=1)
         }
 
         # 4. initialize IMU
@@ -343,10 +398,11 @@ class CorgiDriver:
         """
         self.ros_control_active = True # 標記：開始使用 ROS 控制
         
-        # 1. 解析訊息（包含 PD 增益和前饋扭矩）
+        # 1. 解析訊息（包含 PD 增益、前饋扭矩、及 ABAD gamma）
         CMDS = {
             "A_Theta": msg.module_a.theta, 
             "A_Beta": msg.module_a.beta,
+            "A_Gamma": msg.module_a.gamma,
             "A_kp_r": msg.module_a.kp_r,
             "A_kp_l": msg.module_a.kp_l,
             "A_kd_r": msg.module_a.kd_r,
@@ -356,6 +412,7 @@ class CorgiDriver:
             
             "B_Theta": msg.module_b.theta, 
             "B_Beta": msg.module_b.beta,
+            "B_Gamma": msg.module_b.gamma,
             "B_kp_r": msg.module_b.kp_r,
             "B_kp_l": msg.module_b.kp_l,
             "B_kd_r": msg.module_b.kd_r,
@@ -365,6 +422,7 @@ class CorgiDriver:
             
             "C_Theta": msg.module_c.theta, 
             "C_Beta": msg.module_c.beta,
+            "C_Gamma": msg.module_c.gamma,
             "C_kp_r": msg.module_c.kp_r,
             "C_kp_l": msg.module_c.kp_l,
             "C_kd_r": msg.module_c.kd_r,
@@ -374,6 +432,7 @@ class CorgiDriver:
             
             "D_Theta": msg.module_d.theta, 
             "D_Beta": msg.module_d.beta,
+            "D_Gamma": msg.module_d.gamma,
             "D_kp_r": msg.module_d.kp_r,
             "D_kp_l": msg.module_d.kp_l,
             "D_kd_r": msg.module_d.kd_r,
@@ -398,6 +457,8 @@ class CorgiDriver:
                 self.KD, self.KD,
                 cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
             )
+            self.legs['A'].set_abad(cmd["A_Gamma"])
+            self.legs['A'].update_g_joint(cmd["A_Theta"], -cmd["A_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], -cmd["B_Beta"],
@@ -405,6 +466,8 @@ class CorgiDriver:
                 self.KD, self.KD,
                 cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
             )
+            self.legs['B'].set_abad(cmd["B_Gamma"])
+            self.legs['B'].update_g_joint(cmd["B_Theta"], -cmd["B_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], -cmd["C_Beta"],
@@ -412,6 +475,8 @@ class CorgiDriver:
                 self.KD, self.KD,
                 cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
             )
+            self.legs['C'].set_abad(cmd["C_Gamma"])
+            self.legs['C'].update_g_joint(cmd["C_Theta"], -cmd["C_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], -cmd["D_Beta"],
@@ -419,6 +484,8 @@ class CorgiDriver:
                 self.KD, self.KD,
                 cmd["D_torque_r"] + self.trq_feedforward, cmd["D_torque_l"] + self.trq_feedforward
             )
+            self.legs['D'].set_abad(cmd["D_Gamma"])
+            self.legs['D'].update_g_joint(cmd["D_Theta"], -cmd["D_Beta"])
             
             # 顯示扭矩控制參數（使用固定 PID 值）
             self.__node.get_logger().debug(

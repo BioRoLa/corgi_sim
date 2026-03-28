@@ -43,7 +43,7 @@ RectangleArena {
   contactMaterial "Floor"
   floorSize 10 10
 }
-DEF CorgiRobot CorgiRobotABAD {
+CorgiRobotABAD {
   translation -0.01 0 -0.05
   controller "<extern>"
   supervisor TRUE

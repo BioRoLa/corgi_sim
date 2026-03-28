@@ -1,4 +1,5 @@
 import os
+import socket
 import launch
 from launch import LaunchDescription
 from launch_ros.actions import Node
@@ -6,8 +7,19 @@ from ament_index_python.packages import get_package_share_directory
 from webots_ros2_driver.webots_launcher import WebotsLauncher
 from webots_ros2_driver.webots_controller import WebotsController
 
+
+def _find_free_port(start_port=1234, max_tries=100):
+    for port in range(start_port, start_port + max_tries):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if sock.connect_ex(('127.0.0.1', port)) != 0:
+                return port
+    return start_port
+
 def generate_launch_description():
     package_dir = get_package_share_directory('corgi_sim')
+    launch_user = os.environ.get('USER') or os.environ.get('USERNAME') or 'root'
+    webots_port = str(_find_free_port(start_port=int(os.environ.get('WEBOTS_PORT', '1234'))))
     
     # 1. 設定 Webots 世界檔路徑
     world_path = os.path.join(package_dir, 'worlds', "Corgi_ABAD" + ".wbt") # corgi_origin // IFS_Proto // Corgi_ABAD
@@ -15,12 +27,14 @@ def generate_launch_description():
     # 2. 啟動 Webots
     webots = WebotsLauncher(
         world=world_path,
-        ros2_supervisor=False
+        ros2_supervisor=False,
+        port=webots_port
     )
 
     # 3. 啟動機器人控制器 (ROS 2 Bridge)
     robot_driver = WebotsController(
-        robot_name='CorgiRobot', # 必須對應 PROTO 的 name
+        robot_name='CorgiRobotABAD', # 必須對應 PROTO 的 name
+        port=webots_port,
         parameters=[
             {
                 'robot_description': os.path.join(package_dir, 'resource', 'corgi.urdf')
@@ -38,6 +52,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        launch.actions.SetEnvironmentVariable(name='USER', value=launch_user),
+        launch.actions.SetEnvironmentVariable(name='USERNAME', value=launch_user),
         webots,
         robot_driver,
         control_panel,

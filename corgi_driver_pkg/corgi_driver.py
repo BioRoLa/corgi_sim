@@ -461,7 +461,7 @@ class CorgiDriver:
             self.legs['A'].update_g_joint(cmd["A_Theta"], -cmd["A_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
-                cmd["B_Theta"], -cmd["B_Beta"],
+                cmd["B_Theta"], cmd["B_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
@@ -470,7 +470,7 @@ class CorgiDriver:
             self.legs['B'].update_g_joint(cmd["B_Theta"], -cmd["B_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
-                cmd["C_Theta"], -cmd["C_Beta"],
+                cmd["C_Theta"], cmd["C_Beta"],
                 self.KP, self.KP,
                 self.KD, self.KD,
                 cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward

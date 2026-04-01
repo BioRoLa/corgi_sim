@@ -1,11 +1,13 @@
 import rclpy
 import math
+import os
 
 # --- Webots 控制器模組 (用於控制模擬狀態) ---
 from controller import Supervisor
 
 # --- [新增] Supervisor 與 TF 相關模組 ---
 from rosgraph_msgs.msg import Clock
+from corgi_msgs.msg import TriggerStamped
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import Quaternion
@@ -283,15 +285,15 @@ class LegManager:
         
         msg = MotorState()
         theta, beta = self.tb.FK(pos_l, pos_r)
-        msg.theta, msg.beta = theta, beta
+        msg.theta, msg.beta = float(theta), float(beta)
         
         # 直接使用set_target中計算的速度（已經過濾波）
-        msg.velocity_l = self.current_vel_l
-        msg.velocity_r = self.current_vel_r
+        msg.velocity_l = float(self.current_vel_l)
+        msg.velocity_r = float(self.current_vel_r)
         
         # 發布扭矩命令值（命令扭矩，而非回饋）
-        msg.torque_r = self.cmd_trq_r
-        msg.torque_l = self.cmd_trq_l
+        msg.torque_r = float(self.cmd_trq_r)
+        msg.torque_l = float(self.cmd_trq_l)
         return msg
     
 class CorgiDriver:
@@ -386,11 +388,48 @@ class CorgiDriver:
         
         # Initialize loop counter
         self.loop_counter = 0
-        self.__node.get_logger().info("Driver Initialized!")
         
-        # Pause simulation at the beginning
-        self.__robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
+        # --- Experiment Mode ---
+        self.experiment_mode = os.environ.get('CORGI_EXPERIMENT_MODE', '0') == '1'
+        self.support_box_removed = False
         
+        if self.experiment_mode:
+            self.__node.get_logger().info("[Experiment Mode] Skipping initial pause. Subscribing to /trigger for support box removal.")
+            # Subscribe to /trigger to remove the support box when experiment starts
+            self.trigger_sub = self.__node.create_subscription(
+                TriggerStamped,
+                'trigger',
+                self._experiment_trigger_cb,
+                10
+            )
+        else:
+            # Normal mode: pause simulation at the beginning
+            self.__robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
+        
+        container_id = os.environ.get('HOSTNAME', 'Unknown')
+        domain_id = os.environ.get('ROS_DOMAIN_ID', '???')
+        self.__node.get_logger().info(f"Driver Initialized! Connected from Container: {container_id} (Domain: {domain_id})")
+        
+    def _experiment_trigger_cb(self, msg):
+        """[Experiment Mode] Remove support box when trigger is enabled."""
+        if msg.enable and not self.support_box_removed:
+            try:
+                box_node = self.__robot.getFromDef('SUPPORT_BOX')
+                if box_node:
+                    box_node.remove()
+                    self.support_box_removed = True
+                    self.__node.get_logger().info(
+                        "[Experiment Mode] Support box removed! Robot is now free-standing."
+                    )
+                else:
+                    self.__node.get_logger().warn(
+                        "[Experiment Mode] DEF SUPPORT_BOX not found in world."
+                    )
+            except Exception as e:
+                self.__node.get_logger().error(
+                    f"[Experiment Mode] Failed to remove support box: {e}"
+                )
+
     # Motor Command callback
     def cb_motor(self, msg):
         """

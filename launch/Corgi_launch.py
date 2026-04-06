@@ -31,7 +31,7 @@ def generate_launch_description():
         port=webots_port
     )
 
-    # 3. 啟動機器人控制器 (ROS 2 Bridge)
+    # 3. 啟動機器人控制器 (CorgiRobot)
     robot_driver = WebotsController(
         robot_name='CorgiRobotABAD', # 必須對應 PROTO 的 name
         port=webots_port,

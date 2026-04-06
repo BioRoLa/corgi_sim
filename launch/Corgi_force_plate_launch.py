@@ -20,7 +20,7 @@ def generate_launch_description():
 
     # 3. 啟動機器人控制器 (CorgiRobot)
     robot_driver = WebotsController(
-        robot_name='CorgiRobot', # 必須對應 PROTO 的 name
+        robot_name='CorgiRobotABAD', # 與 Corgi_launch.py 一致
         parameters=[
             {
                 'robot_description': os.path.join(package_dir, 'resource', 'corgi.urdf')

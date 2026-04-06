@@ -3,7 +3,7 @@
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
-EXTERNPROTO "../protos/CorgiRobot.proto"
+EXTERNPROTO "../protos/CorgiRobotABAD.proto"
 
 WorldInfo {
   basicTimeStep 1
@@ -34,7 +34,7 @@ Solid {
   physics Physics {
   }
 }
-CorgiRobot {
+CorgiRobotABAD {
   translation -0.02 0 0.191
 }
 

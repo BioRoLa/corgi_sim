@@ -2,7 +2,7 @@
 
 build/
 install/
-logs/
+log/
 
 **/__pycache__/
 *.pyc

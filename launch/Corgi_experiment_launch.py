@@ -44,6 +44,7 @@ def generate_launch_description():
     # 2. 啟動 Webots — mode 預設 realtime (不停頓)
     webots = WebotsLauncher(
         world=world_path,
+        gui=False,
         ros2_supervisor=False,
         mode=LaunchConfiguration('mode'),
         port=webots_port

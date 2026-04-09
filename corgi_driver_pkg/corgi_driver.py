@@ -143,7 +143,7 @@ class LegManager:
                 motor.enableTorqueFeedback(self.basic_time_step)
                 motor.setAvailableTorque(self.Max_Torque)
         
-        # --- ABAD 馬達 (位置控制) ---
+        # --- ABAD 馬達 ---
         self.motor_abad = None
         self.sensor_abad = None
         self.prev_pos_abad = None

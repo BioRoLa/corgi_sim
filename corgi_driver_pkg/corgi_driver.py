@@ -587,9 +587,9 @@ class CorgiDriver:
             motor_debug_msg = "\n"
             motor_debug_msg += self.legs['A'].set_target(
                 cmd["A_Theta"], -cmd["A_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
+                cmd["A_kp_r"], cmd["A_kp_l"],
+                cmd["A_kd_r"], cmd["A_kd_l"],
+                -cmd["A_torque_l"], -cmd["A_torque_r"]
             )
             motor_debug_msg += " | " + self.legs['A'].set_abad(
                 cmd["A_Gamma"], cmd["A_kp_h"], cmd["A_kd_h"], cmd["A_torque_h"]
@@ -598,9 +598,9 @@ class CorgiDriver:
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], cmd["B_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
+                cmd["B_kp_r"], cmd["B_kp_l"],
+                cmd["B_kd_r"], cmd["B_kd_l"],
+                -cmd["B_torque_l"], -cmd["B_torque_r"]
             )
             motor_debug_msg += " | " + self.legs['B'].set_abad(
                 cmd["B_Gamma"], cmd["B_kp_h"], cmd["B_kd_h"], cmd["B_torque_h"]
@@ -609,9 +609,9 @@ class CorgiDriver:
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], cmd["C_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
+                cmd["C_kp_r"], cmd["C_kp_l"],
+                cmd["C_kd_r"], cmd["C_kd_l"],
+                -cmd["C_torque_l"], -cmd["C_torque_r"]
             )
             motor_debug_msg += " | " + self.legs['C'].set_abad(
                 cmd["C_Gamma"], cmd["C_kp_h"], cmd["C_kd_h"], cmd["C_torque_h"]
@@ -620,9 +620,9 @@ class CorgiDriver:
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], -cmd["D_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["D_torque_r"] + self.trq_feedforward, cmd["D_torque_l"] + self.trq_feedforward
+                cmd["D_kp_r"], cmd["D_kp_l"],
+                cmd["D_kd_r"], cmd["D_kd_l"],
+                -cmd["D_torque_l"], -cmd["D_torque_r"]
             )
             motor_debug_msg += " | " + self.legs['D'].set_abad(
                 cmd["D_Gamma"], cmd["D_kp_h"], cmd["D_kd_h"], cmd["D_torque_h"]

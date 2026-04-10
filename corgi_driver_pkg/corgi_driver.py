@@ -586,7 +586,7 @@ class CorgiDriver:
             # 處理四腿目標（使用固定 PID 參數）
             motor_debug_msg = "\n"
             motor_debug_msg += self.legs['A'].set_target(
-                cmd["A_Theta"], -cmd["A_Beta"],
+                cmd["A_Theta"], cmd["A_Beta"],
                 cmd["A_kp_r"], cmd["A_kp_l"],
                 cmd["A_kd_r"], cmd["A_kd_l"],
                 -cmd["A_torque_l"], -cmd["A_torque_r"]
@@ -619,7 +619,7 @@ class CorgiDriver:
             self.legs['C'].update_g_joint(cmd["C_Theta"], -cmd["C_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
-                cmd["D_Theta"], -cmd["D_Beta"],
+                cmd["D_Theta"], cmd["D_Beta"],
                 cmd["D_kp_r"], cmd["D_kp_l"],
                 cmd["D_kd_r"], cmd["D_kd_l"],
                 -cmd["D_torque_l"], -cmd["D_torque_r"]

@@ -1,0 +1,71 @@
+#VRML_SIM R2025a utf8
+# ============================================================
+# GPU Rendering Speed Test World
+# ============================================================
+# 使用 CorgiRobotABAD_IFS (882KB) 替代 CorgiRobotABAD (95MB)
+# 後者會因 Webots R2025a PROTO parser 記憶體限制造成 segfault。
+# 無任何 EXTERNPROTO URL，容器內可立即啟動。
+# ============================================================
+
+EXTERNPROTO "../protos/CorgiRobotABAD_IFS.proto"
+
+WorldInfo {
+  basicTimeStep 1
+  contactProperties [
+    ContactProperties {
+      material1 "Floor"
+      maxContactJoints 20
+    }
+  ]
+}
+
+Viewpoint {
+  orientation -0.14757799271329652 -0.0709487119663418 0.9865024157786089 3.8407486596226947
+  position 1.3677793098053315 1.239016517481483 0.5788034117040215
+  followType "Pan and Tilt Shot"
+  followSmoothness 1
+}
+
+Background {
+  skyColor [
+    0.4 0.7 1.0
+  ]
+  luminosity 1
+}
+
+DirectionalLight {
+  direction -1 -1 -1
+  intensity 1.5
+  castShadows TRUE
+}
+
+DEF GROUND Solid {
+  translation 0 0 0
+  children [
+    Shape {
+      appearance Appearance {
+        material Material {
+          diffuseColor 0.6 0.6 0.6
+        }
+      }
+      geometry Plane {
+        size 10 10
+      }
+    }
+  ]
+  name "ground"
+  contactMaterial "Floor"
+  boundingObject Plane {
+    size 10 10
+  }
+  locked TRUE
+}
+
+# Corgi 機器人 (IFS 版本，882KB，不會造成 segfault)
+CorgiRobotABAD_IFS {
+  translation 0 0 0.35
+  rotation 0 0 1 0
+  name "CorgiRobotABAD"
+  controller "gpu_render_test"
+  supervisor TRUE
+}

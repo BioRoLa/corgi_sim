@@ -9,7 +9,7 @@ from ament_index_python.packages import get_package_share_directory
 from webots_ros2_driver.webots_launcher import WebotsLauncher
 from webots_ros2_driver.webots_controller import WebotsController
 
-
+# Utility function to find a free port for Webots communication
 def _find_free_port(start_port=1234, max_tries=100):
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -18,6 +18,7 @@ def _find_free_port(start_port=1234, max_tries=100):
                 return port
     return start_port
 
+# Launch description for the Corgi experiment setup
 def generate_launch_description():
     package_dir = get_package_share_directory('corgi_sim')
     launch_user = os.environ.get('USER') or os.environ.get('USERNAME') or 'root'

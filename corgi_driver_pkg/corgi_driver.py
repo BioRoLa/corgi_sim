@@ -594,7 +594,7 @@ class CorgiDriver:
             motor_debug_msg += " | " + self.legs['A'].set_abad(
                 cmd["A_Gamma"], cmd["A_kp_h"], cmd["A_kd_h"], cmd["A_torque_h"]
             )
-            self.legs['A'].update_g_joint(cmd["A_Theta"], -cmd["A_Beta"])
+            self.legs['A'].update_g_joint(cmd["A_Theta"], cmd["A_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['B'].set_target(
                 cmd["B_Theta"], cmd["B_Beta"],
@@ -605,7 +605,7 @@ class CorgiDriver:
             motor_debug_msg += " | " + self.legs['B'].set_abad(
                 cmd["B_Gamma"], cmd["B_kp_h"], cmd["B_kd_h"], cmd["B_torque_h"]
             )
-            self.legs['B'].update_g_joint(cmd["B_Theta"], -cmd["B_Beta"])
+            self.legs['B'].update_g_joint(cmd["B_Theta"], cmd["B_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['C'].set_target(
                 cmd["C_Theta"], cmd["C_Beta"],
@@ -616,7 +616,7 @@ class CorgiDriver:
             motor_debug_msg += " | " + self.legs['C'].set_abad(
                 cmd["C_Gamma"], cmd["C_kp_h"], cmd["C_kd_h"], cmd["C_torque_h"]
             )
-            self.legs['C'].update_g_joint(cmd["C_Theta"], -cmd["C_Beta"])
+            self.legs['C'].update_g_joint(cmd["C_Theta"], cmd["C_Beta"])
             motor_debug_msg += "\n"
             motor_debug_msg += self.legs['D'].set_target(
                 cmd["D_Theta"], cmd["D_Beta"],
@@ -627,7 +627,7 @@ class CorgiDriver:
             motor_debug_msg += " | " + self.legs['D'].set_abad(
                 cmd["D_Gamma"], cmd["D_kp_h"], cmd["D_kd_h"], cmd["D_torque_h"]
             )
-            self.legs['D'].update_g_joint(cmd["D_Theta"], -cmd["D_Beta"])
+            self.legs['D'].update_g_joint(cmd["D_Theta"], cmd["D_Beta"])
             
             # 顯示扭矩控制參數（使用固定 PID 值）
             self.__node.get_logger().debug(

@@ -1,6 +1,7 @@
 import rclpy
 import math
 import os
+import yaml
 
 # --- Webots 控制器模組 (用於控制模擬狀態) ---
 from controller import Supervisor
@@ -20,6 +21,18 @@ from corgi_msgs.msg import RobotStateStamped
 
 from . import Controller_TB
 from .LegModel import LegModel
+from .motor_config import LEG_CONFIG
+
+
+def _load_leg_config():
+    """從與本模組相同目錄的 motor_config.yaml 讀取關節方向設定。
+    修改 YAML 後直接重啟 Webots 即可，不需要 colcon build。"""
+    yaml_path = os.path.join(os.path.dirname(__file__), 'motor_config.yaml')
+    with open(yaml_path, 'r') as f:
+        return yaml.safe_load(f)
+
+
+LEG_CONFIG = _load_leg_config()
 
 class imu:
     def __init__(self, robot, node, basic_time_step=1):
@@ -103,12 +116,21 @@ class imu:
 
 class LegManager:
     def __init__(self, robot, prefix, controller_tb, basic_time_step=1, Max_Torque=35,
-                 abad_prefix=None, axis_dir=1):
+                 abad_prefix=None, leg_config=None):
         self.prefix = prefix
         self.motors = {}
         self.sensors = {}
         self.tb = controller_tb
-        self.axis_dir = axis_dir
+
+        cfg = leg_config or {}
+        jdir = cfg.get('joint_dir', {})
+        mdir = cfg.get('motor_dir', {})
+        self.dir_theta    = jdir.get('theta',        1.0)
+        self.dir_beta     = jdir.get('beta',         1.0)
+        self.dir_g_beta   = jdir.get('g_joint_beta', 1.0)
+        self.dir_motor_l  = mdir.get('L',    1.0)
+        self.dir_motor_r  = mdir.get('R',    1.0)
+        self.dir_abad     = mdir.get('ABAD', 1.0)
         motor_names = ["L_Motor", "R_Motor"]
         self.prev_pos_l = None
         self.prev_pos_r = None
@@ -249,12 +271,12 @@ class LegManager:
         
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
         trq_r, err_r = self._apply_torque_control(
-            "R_Motor", cmd_R, pos_r, vel_r,
-            kp=kp_r, kd=kd_r, torque_ff=torque_r
+            "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
+            kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r
         )
         trq_l, err_l = self._apply_torque_control(
-            "L_Motor", cmd_L, pos_l, vel_l,
-            kp=kp_l, kd=kd_l, torque_ff=torque_l
+            "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
+            kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l
         )
         
         # 保存實際套用的扭矩命令
@@ -293,14 +315,14 @@ class LegManager:
         self.prev_pos_h = pos_h
         self.prev_vel_h = vel_h
 
-        gamma_target = self._find_closest_phi(gamma * self.axis_dir, pos_h)
+        gamma_target = self._find_closest_phi(gamma * self.dir_abad, pos_h)
         trq_h, _ = self._apply_torque_control(
             "ABAD", gamma_target, pos_h, vel_h,
-            kp=kp, kd=kd, torque_ff=torque * self.axis_dir
+            kp=kp, kd=kd, torque_ff=torque * self.dir_abad
         )
 
-        self.current_vel_h = vel_h * self.axis_dir
-        self.cmd_trq_h = trq_h * self.axis_dir
+        self.current_vel_h = vel_h * self.dir_abad
+        self.cmd_trq_h = trq_h * self.dir_abad
     
     def update_g_joint(self, theta, beta):
         """根據 theta/beta 更新 G_Joint 被動追蹤
@@ -311,7 +333,7 @@ class LegManager:
         """
         if self.motor_g_joint and self.leg_model:
             self.leg_model.theta = theta
-            self.leg_model.beta = beta
+            self.leg_model.beta = beta * self.dir_g_beta
             self.leg_model.calculate()
             g_joint_target = self.leg_model['ang_OGF'] - self.G_Offset
             self.motor_g_joint.setPosition(g_joint_target)
@@ -326,7 +348,7 @@ class LegManager:
     def get_states(self):
         pos_l = self.sensors["L_Motor"].getValue()
         pos_r = self.sensors["R_Motor"].getValue()
-        pos_h = self.sensor_abad.getValue() * self.axis_dir if self.sensor_abad else 0.0
+        pos_h = self.sensor_abad.getValue() * self.dir_abad if self.sensor_abad else 0.0
         
         msg = MotorState()
         theta, beta = self.tb.FK(pos_l, pos_r)
@@ -382,23 +404,18 @@ class CorgiDriver:
         self.Max_Torque = 35.0
         self.trq_feedforward = 0  # N·m 前饋扭矩
         
-        # 3. initialize Legs
-        self.tb_lib = Controller_TB.Controller_TB(theta_0=math.radians(17))
-        # ABAD axis_dir 設定：與 CSV_Controller_12D 中一致
-        # A(FL): -1, B(FR): 1, C(RR): -1, D(RL): 1
+        # 3. initialize Legs (direction config loaded from motor_config.py)
         self.legs = {
-            'A': LegManager(self.__robot, "A_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
-                             abad_prefix='A', axis_dir=-1),
-            'B': LegManager(self.__robot, "B_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
-                             abad_prefix='B', axis_dir=1),
-            'C': LegManager(self.__robot, "C_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
-                             abad_prefix='C', axis_dir=-1),
-            'D': LegManager(self.__robot, "D_Module_", Controller_TB.Controller_TB(theta_0=math.radians(17)),
-                             basic_time_step=self.__timestep, Max_Torque=self.Max_Torque,
-                             abad_prefix='D', axis_dir=1)
+            leg_id: LegManager(
+                self.__robot,
+                f"{leg_id}_Module_",
+                Controller_TB.Controller_TB(theta_0=math.radians(17)),
+                basic_time_step=self.__timestep,
+                Max_Torque=self.Max_Torque,
+                abad_prefix=leg_id,
+                leg_config=LEG_CONFIG[leg_id],
+            )
+            for leg_id in ('A', 'B', 'C', 'D')
         }
 
         # 4. initialize IMU
@@ -551,49 +568,25 @@ class CorgiDriver:
         if cmd:
             # 處理四腿目標（使用固定 PID 參數）
             motor_debug_msg = "\n"
-            motor_debug_msg += self.legs['A'].set_target(
-                cmd["A_Theta"], -cmd["A_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["A_torque_r"] + self.trq_feedforward, cmd["A_torque_l"] + self.trq_feedforward
-            )
-            self.legs['A'].set_abad(
-                cmd["A_Gamma"], cmd["A_kp_h"], cmd["A_kd_h"], cmd["A_torque_h"]
-            )
-            self.legs['A'].update_g_joint(cmd["A_Theta"], -cmd["A_Beta"])
-            motor_debug_msg += "\n"
-            motor_debug_msg += self.legs['B'].set_target(
-                cmd["B_Theta"], cmd["B_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["B_torque_r"] + self.trq_feedforward, cmd["B_torque_l"] + self.trq_feedforward
-            )
-            self.legs['B'].set_abad(
-                cmd["B_Gamma"], cmd["B_kp_h"], cmd["B_kd_h"], cmd["B_torque_h"]
-            )
-            self.legs['B'].update_g_joint(cmd["B_Theta"], -cmd["B_Beta"])
-            motor_debug_msg += "\n"
-            motor_debug_msg += self.legs['C'].set_target(
-                cmd["C_Theta"], cmd["C_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["C_torque_r"] + self.trq_feedforward, cmd["C_torque_l"] + self.trq_feedforward
-            )
-            self.legs['C'].set_abad(
-                cmd["C_Gamma"], cmd["C_kp_h"], cmd["C_kd_h"], cmd["C_torque_h"]
-            )
-            self.legs['C'].update_g_joint(cmd["C_Theta"], -cmd["C_Beta"])
-            motor_debug_msg += "\n"
-            motor_debug_msg += self.legs['D'].set_target(
-                cmd["D_Theta"], -cmd["D_Beta"],
-                self.KP, self.KP,
-                self.KD, self.KD,
-                cmd["D_torque_r"] + self.trq_feedforward, cmd["D_torque_l"] + self.trq_feedforward
-            )
-            self.legs['D'].set_abad(
-                cmd["D_Gamma"], cmd["D_kp_h"], cmd["D_kd_h"], cmd["D_torque_h"]
-            )
-            self.legs['D'].update_g_joint(cmd["D_Theta"], -cmd["D_Beta"])
+            for leg_id in ('A', 'B', 'C', 'D'):
+                leg = self.legs[leg_id]
+                theta = cmd[f"{leg_id}_Theta"] * leg.dir_theta
+                beta  = cmd[f"{leg_id}_Beta"]  * leg.dir_beta
+                motor_debug_msg += leg.set_target(
+                    theta, beta,
+                    self.KP, self.KP,
+                    self.KD, self.KD,
+                    cmd[f"{leg_id}_torque_r"] + self.trq_feedforward,
+                    cmd[f"{leg_id}_torque_l"] + self.trq_feedforward,
+                )
+                leg.set_abad(
+                    cmd[f"{leg_id}_Gamma"],
+                    cmd[f"{leg_id}_kp_h"],
+                    cmd[f"{leg_id}_kd_h"],
+                    cmd[f"{leg_id}_torque_h"],
+                )
+                leg.update_g_joint(theta, beta)
+                motor_debug_msg += "\n"
             
             # 顯示扭矩控制參數（使用固定 PID 值）
             self.__node.get_logger().debug(
@@ -602,34 +595,16 @@ class CorgiDriver:
 
         else:
             # If no command has ever been received, set to default position
-            self.legs['A'].set_target(
-                self.default_theta, self.default_beta,
-                self.KP, self.KP,
-                self.KD, self.KD,
-                0.0, 0.0
-            )
-            self.legs['A'].set_abad(self.default_gamma, self.KP, self.KD, 0.0)
-            self.legs['B'].set_target(
-                self.default_theta, self.default_beta,
-                self.KP, self.KP,
-                self.KD, self.KD,
-                0.0, 0.0
-            )
-            self.legs['B'].set_abad(self.default_gamma, self.KP, self.KD, 0.0)
-            self.legs['C'].set_target(
-                self.default_theta, self.default_beta,
-                self.KP, self.KP,
-                self.KD, self.KD,
-                0.0, 0.0
-            )
-            self.legs['C'].set_abad(self.default_gamma, self.KP, self.KD, 0.0)
-            self.legs['D'].set_target(
-                self.default_theta, self.default_beta,
-                self.KP, self.KP,
-                self.KD, self.KD,
-                0.0, 0.0
-            )
-            self.legs['D'].set_abad(self.default_gamma, self.KP, self.KD, 0.0)
+            for leg_id in ('A', 'B', 'C', 'D'):
+                leg = self.legs[leg_id]
+                leg.set_target(
+                    self.default_theta * leg.dir_theta,
+                    self.default_beta  * leg.dir_beta,
+                    self.KP, self.KP,
+                    self.KD, self.KD,
+                    0.0, 0.0,
+                )
+                leg.set_abad(self.default_gamma, self.KP, self.KD, 0.0)
     
     def pub_tf(self):
         # B. 發布 TF (完美的里程計)

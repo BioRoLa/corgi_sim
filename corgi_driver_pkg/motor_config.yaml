@@ -24,7 +24,7 @@ A:
 B:
   joint_dir:
     theta: 1.0
-    beta: 1.0
+    beta: -1.0
     g_joint_beta: -1.0
   motor_dir:
     L: 1.0
@@ -34,7 +34,7 @@ B:
 C:
   joint_dir:
     theta: 1.0
-    beta: 1.0
+    beta: -1.0
     g_joint_beta: -1.0
   motor_dir:
     L: 1.0

@@ -352,18 +352,18 @@ class LegManager:
         
         msg = MotorState()
         theta, beta = self.tb.FK(pos_l, pos_r)
-        msg.theta, msg.beta = float(theta), float(beta)
+        msg.theta, msg.beta = float(theta), -float(beta)
         msg.gamma = float(pos_h)
         
         # 直接使用控制器中計算的速度（已經過濾波）
-        msg.velocity_l = float(self.current_vel_l)
-        msg.velocity_r = float(self.current_vel_r)
-        msg.velocity_h = float(self.current_vel_h)
+        msg.velocity_l = -float(self.current_vel_l)
+        msg.velocity_r = -float(self.current_vel_r)
+        msg.velocity_h = -float(self.current_vel_h)
         
         # 發布扭矩命令值（命令扭矩，而非回饋）
-        msg.torque_r = float(self.cmd_trq_r)
-        msg.torque_l = float(self.cmd_trq_l)
-        msg.torque_h = float(self.cmd_trq_h)
+        msg.torque_r = -float(self.cmd_trq_r)
+        msg.torque_l = -float(self.cmd_trq_l)
+        msg.torque_h = -float(self.cmd_trq_h)
         return msg
     
 class CorgiDriver:
@@ -574,16 +574,16 @@ class CorgiDriver:
                 beta  = cmd[f"{leg_id}_Beta"]  * leg.dir_beta
                 motor_debug_msg += leg.set_target(
                     theta, beta,
-                    self.KP, self.KP,
-                    self.KD, self.KD,
-                    cmd[f"{leg_id}_torque_r"] + self.trq_feedforward,
-                    cmd[f"{leg_id}_torque_l"] + self.trq_feedforward,
+                    cmd[f"{leg_id}_kp_r"], cmd[f"{leg_id}_kp_l"],
+                    cmd[f"{leg_id}_kd_r"], cmd[f"{leg_id}_kd_l"],
+                    -cmd[f"{leg_id}_torque_r"],
+                    -cmd[f"{leg_id}_torque_l"],
                 )
                 leg.set_abad(
                     cmd[f"{leg_id}_Gamma"],
                     cmd[f"{leg_id}_kp_h"],
                     cmd[f"{leg_id}_kd_h"],
-                    cmd[f"{leg_id}_torque_h"],
+                    -cmd[f"{leg_id}_torque_h"],
                 )
                 leg.update_g_joint(theta, beta)
                 motor_debug_msg += "\n"

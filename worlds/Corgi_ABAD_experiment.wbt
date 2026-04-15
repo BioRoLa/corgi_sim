@@ -1,0 +1,47 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "../protos/CorgiRobotABAD.proto"
+
+WorldInfo {
+  basicTimeStep 1
+  contactProperties [
+    ContactProperties {
+      material1 "Floor"
+      maxContactJoints 20
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.1475782266039213 -0.07094884326461756 0.9865023713462905 3.840749230650121
+  position 1.870431338935694 1.6652372076916029 0.7880940780514776
+  followSmoothness 1
+}
+DEF SUPPORT_BOX Solid {
+  translation 0 0 -0.12
+  children [
+    DEF BOX Shape {
+      geometry Box {
+        size 0.4 0.2 0.1
+      }
+    }
+  ]
+  boundingObject USE BOX
+  physics Physics {
+  }
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+  castShadows FALSE
+}
+RectangleArena {
+  translation 0 0.02 -0.17
+  contactMaterial "Floor"
+  floorSize 10 10
+}
+CorgiRobotABAD {
+  translation -0.01 0 -0.05
+}

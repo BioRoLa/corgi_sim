@@ -3,11 +3,13 @@ import socket
 import launch
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 from webots_ros2_driver.webots_launcher import WebotsLauncher
 from webots_ros2_driver.webots_controller import WebotsController
 
-
+# Utility function to find a free port for Webots communication
 def _find_free_port(start_port=1234, max_tries=100):
     for port in range(start_port, start_port + max_tries):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -16,47 +18,62 @@ def _find_free_port(start_port=1234, max_tries=100):
                 return port
     return start_port
 
+# Launch description for the Corgi experiment setup
 def generate_launch_description():
     package_dir = get_package_share_directory('corgi_sim')
     launch_user = os.environ.get('USER') or os.environ.get('USERNAME') or 'root'
     webots_port = str(_find_free_port(start_port=int(os.environ.get('WEBOTS_PORT', '1234'))))
     
-    # 1. 設定 Webots 世界檔路徑
-    world_path = os.path.join(package_dir, 'worlds', "Corgi_ABAD" + ".wbt") # corgi_origin // IFS_Proto // Corgi_ABAD
+    # --- Launch Arguments ---
+    mode_arg = DeclareLaunchArgument(
+        'mode',
+        default_value='realtime',
+        description='Webots startup mode: realtime, pause, fast'
+    )
+    
+    world_arg = DeclareLaunchArgument(
+        'world',
+        default_value='Corgi_ABAD_experiment.wbt',
+        description='Choose the world file name'
+    )
 
-    # 2. 啟動 Webots
+    # 1. 使用實驗專用 world (Solid 有 DEF SUPPORT_BOX 可供 Supervisor 移除)
+    world_path = launch.substitutions.PathJoinSubstitution([
+        package_dir, 'worlds', LaunchConfiguration('world')
+    ])
+
+    # 2. 啟動 Webots — mode 預設 realtime (不停頓)
     webots = WebotsLauncher(
         world=world_path,
+        gui=True,
         ros2_supervisor=False,
+        mode=LaunchConfiguration('mode'),
         port=webots_port
     )
 
     # 3. 啟動機器人控制器 (ROS 2 Bridge)
     robot_driver = WebotsController(
-        robot_name='CorgiRobotABAD', # 必須對應 PROTO 的 name
+        robot_name='CorgiRobotABAD',
         port=webots_port,
         parameters=[
             {
                 'robot_description': os.path.join(package_dir, 'resource', 'corgi.urdf')
             }
         ],
-        respawn=True    #maintain connection if Webots restarts
+        respawn=True
     )
 
-    # 4. 啟動 Corgi 控制面板
-    control_panel = Node(
-        package='corgi_panel',
-        executable='corgi_control_panel',
-        parameters=[{'use_sim_time': True}],
-        output='screen'
-    )
+    # *** 不啟動 corgi_panel — 實驗 / headless 模式不需要 GUI ***
 
     return LaunchDescription([
+        mode_arg,
+        world_arg,
         launch.actions.SetEnvironmentVariable(name='USER', value=launch_user),
         launch.actions.SetEnvironmentVariable(name='USERNAME', value=launch_user),
+        # 告知 driver 跳過初始 PAUSE 並啟用箱子移除邏輯
+        launch.actions.SetEnvironmentVariable(name='CORGI_EXPERIMENT_MODE', value='1'),
         webots,
         robot_driver,
-        control_panel,
         launch.actions.RegisterEventHandler(
             event_handler=launch.event_handlers.OnProcessExit(
                 target_action=webots,

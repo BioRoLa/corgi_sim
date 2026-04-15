@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<robot name="CorgiRobot">
+<robot name="CorgiRobotABAD">
     <webots>
         <plugin type="corgi_driver_pkg.corgi_driver.CorgiDriver" />
     </webots>

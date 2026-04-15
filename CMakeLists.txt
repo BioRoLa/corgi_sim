@@ -8,6 +8,11 @@ find_package(ament_cmake_python REQUIRED)
 # Install Python package
 ament_python_install_package(corgi_driver_pkg)
 
+# Install motor_config.yaml so panels can locate it via ament index
+install(FILES corgi_driver_pkg/motor_config.yaml
+  DESTINATION share/${PROJECT_NAME}
+)
+
 # Install resource directories
 install(DIRECTORY 
   launch

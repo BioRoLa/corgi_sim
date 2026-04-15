@@ -1,0 +1,52 @@
+# motor_config.yaml
+# 定義各腿的關節與馬達方向 (1.0 為正轉, -1.0 為反轉)
+# 直接修改此檔案後，重啟 Webots 即可生效，不需要 colcon build。
+#
+# joint_dir:
+#   theta       : theta 指令方向（腿部伸展角）
+#   beta        : beta  指令方向（腿部旋轉角）
+#   g_joint_beta: G_Joint 被動追蹤的旋轉角方向
+# motor_dir:
+#   L   : 左馬達方向
+#   R   : 右馬達方向
+#   ABAD: 側擺馬達方向
+
+A:
+  joint_dir:
+    theta: 1.0
+    beta: -1.0
+    g_joint_beta: -1.0
+  motor_dir:
+    L: 1.0
+    R: 1.0
+    ABAD: -1.0
+
+B:
+  joint_dir:
+    theta: 1.0
+    beta: 1.0
+    g_joint_beta: -1.0
+  motor_dir:
+    L: 1.0
+    R: 1.0
+    ABAD: 1.0
+
+C:
+  joint_dir:
+    theta: 1.0
+    beta: 1.0
+    g_joint_beta: -1.0
+  motor_dir:
+    L: 1.0
+    R: 1.0
+    ABAD: -1.0
+
+D:
+  joint_dir:
+    theta: 1.0
+    beta: -1.0
+    g_joint_beta: -1.0
+  motor_dir:
+    L: 1.0
+    R: 1.0
+    ABAD: 1.0

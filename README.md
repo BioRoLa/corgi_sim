@@ -41,6 +41,16 @@ Your Controller Node (e.g., corgi_csv_control)
 
 ## Prerequisites
 
+### Git LFS (Large File Storage)
+This repository uses Git LFS to manage large files, specifically the `.proto` files containing CAD data. **You must use Git LFS when pulling, pushing, or adjusting `.proto` files.**
+
+```bash
+# Install Git LFS
+sudo apt update
+sudo apt install git-lfs
+git lfs install
+```
+
 ```bash
 # Install Webots ROS2 driver
 sudo apt update

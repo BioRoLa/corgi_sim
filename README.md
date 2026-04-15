@@ -42,7 +42,7 @@ Your Controller Node (e.g., corgi_csv_control)
 ## Prerequisites
 
 ### Git LFS (Large File Storage)
-This repository uses Git LFS to manage large files, specifically the `.proto` files containing CAD data. **You must use Git LFS when pulling, pushing, or adjusting `.proto` files.**
+This repository uses Git LFS to manage large files, specifically the `protos/CorgiRobotABAD.proto` file containing CAD data. **You must use Git LFS when pulling, pushing, or adjusting this specific `.proto` file.**
 
 ```bash
 # Install Git LFS

@@ -6,3 +6,6 @@ logs/
 
 **/__pycache__/
 *.pyc
+
+# --- Testing Scripts From other place ---
+Inbox/

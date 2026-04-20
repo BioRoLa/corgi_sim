@@ -78,4 +78,5 @@ Solid {
 }
 CorgiRobot {
   translation 0 0 0.5
+  name "CorgiRobot"
 }

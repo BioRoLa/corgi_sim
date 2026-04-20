@@ -8,19 +8,22 @@ from webots_ros2_driver.webots_controller import WebotsController
 
 def generate_launch_description():
     package_dir = get_package_share_directory('corgi_sim')
+    webots_port = os.environ.get('CORGI_WEBOTS_PORT', '1240')
     
     # 1. 設定 Webots 世界檔路徑
-    world_path = os.path.join(package_dir, 'worlds', "IFS_Proto" + ".wbt") # corgi_origin // IFS_Proto // IFS_Proto_uneven
+    world_path = os.path.join(package_dir, 'worlds', "IFS_Proto_lateral" + ".wbt") # corgi_origin // IFS_Proto // IFS_Proto_uneven
 
     # 2. 啟動 Webots
     webots = WebotsLauncher(
         world=world_path,
-        ros2_supervisor=False
+        ros2_supervisor=False,
+        port=webots_port
     )
 
     # 3. 啟動機器人控制器 (CorgiRobot)
     robot_driver = WebotsController(
         robot_name='CorgiRobot', # 必須對應 PROTO 的 name
+        port=webots_port,
         parameters=[
             {
                 'robot_description': os.path.join(package_dir, 'resource', 'corgi.urdf')

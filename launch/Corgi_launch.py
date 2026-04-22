@@ -11,7 +11,7 @@ def generate_launch_description():
     webots_port = os.environ.get('CORGI_WEBOTS_PORT', '1240')
     
     # 1. 設定 Webots 世界檔路徑
-    world_path = os.path.join(package_dir, 'worlds', "IFS_Proto_lateral" + ".wbt") # corgi_origin // IFS_Proto // IFS_Proto_uneven
+    world_path = os.path.join(package_dir, 'worlds', "IFS_Proto" + ".wbt") # corgi_origin // IFS_Proto // IFS_Proto_uneven // IFS_Proto_lateral
 
     # 2. 啟動 Webots
     webots = WebotsLauncher(

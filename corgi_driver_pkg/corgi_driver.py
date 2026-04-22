@@ -1,5 +1,6 @@
 import rclpy
 import math
+import numpy as np
 
 # --- Webots 控制器模組 (用於控制模擬狀態) ---
 from controller import Supervisor
@@ -70,6 +71,22 @@ class imu:
             'imu',
             1000
         )
+        # gravity compensated imu publisher
+        self.imu_gravity_comp_pub = node.create_publisher(
+            ImuStamped,
+            'imu/gravity_compensated',
+            1000
+        )
+
+    def _rotate_world_to_body(self, q, vec_world):
+        # v_body = R(q)^T * v_world
+        x, y, z, w = q
+        R = np.array([
+            [1 - 2*(y*y + z*z), 2*(x*y + z*w),     2*(x*z - y*w)    ],
+            [2*(x*y - z*w),     1 - 2*(x*x + z*z), 2*(y*z + x*w)    ],
+            [2*(x*z + y*w),     2*(y*z - x*w),     1 - 2*(x*x + y*y)],
+        ])
+        return R.T @ np.array(vec_world)
         
     def get_msg(self, time_stamp = Time(), seq = -1):
         """
@@ -99,6 +116,34 @@ class imu:
         if self.sensor_Accelerometer:
             acc = self.sensor_Accelerometer.getValues()
             msg.linear_acceleration = Vector3(x=acc[0], y=acc[1], z=acc[2])
+        return msg
+
+    def get_gravity_compensated_msg(self, raw_msg):
+        """Return a copy of IMU msg with gravity removed from linear_acceleration."""
+        msg = ImuStamped()
+        msg.header = raw_msg.header
+        msg.orientation = raw_msg.orientation
+        msg.angular_velocity = raw_msg.angular_velocity
+        msg.linear_acceleration = raw_msg.linear_acceleration
+
+        q = (
+            msg.orientation.x,
+            msg.orientation.y,
+            msg.orientation.z,
+            msg.orientation.w,
+        )
+        q_norm = math.sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3])
+        if q_norm < 1e-9:
+            return msg
+
+        q = (q[0] / q_norm, q[1] / q_norm, q[2] / q_norm, q[3] / q_norm)
+        gravity_body = self._rotate_world_to_body(q, [0.0, 0.0, -9.81])
+
+        # a_true = a_measured + R^T * g_world  (specific force model: a_meas = a_true - g_body)
+        acc = np.array([raw_msg.linear_acceleration.x,
+                        raw_msg.linear_acceleration.y,
+                        raw_msg.linear_acceleration.z]) + gravity_body
+        msg.linear_acceleration = Vector3(x=acc[0], y=acc[1], z=acc[2])
         return msg
 
 class LegManager:
@@ -542,7 +587,9 @@ class CorgiDriver:
         time_stamp.sec = int(self.__robot.getTime())
         time_stamp.nanosec = int((self.__robot.getTime() - int(self.__robot.getTime())) * 1e9)
         imu_msg = self.imu_sensor.get_msg(time_stamp, self.loop_counter)
+        imu_gravity_comp_msg = self.imu_sensor.get_gravity_compensated_msg(imu_msg)
         self.imu_sensor.imu_pub.publish(imu_msg)
+        self.imu_sensor.imu_gravity_comp_pub.publish(imu_gravity_comp_msg)
     
     def pub_clock(self):
         """pub sim clock to /clock topic"""

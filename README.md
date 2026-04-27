@@ -42,14 +42,39 @@ Your Controller Node (e.g., corgi_csv_control)
 ## Prerequisites
 
 ### Git LFS (Large File Storage)
-This repository uses Git LFS to manage large files, specifically the `protos/CorgiRobotABAD.proto` file containing CAD data. **You must use Git LFS when pulling, pushing, or adjusting this specific `.proto` file.**
+This repository uses Git LFS to manage large files, specifically the `.proto` files containing 3D CAD data and models (e.g., `protos/CorgiRobot.proto` and `protos/CorgiRobotABAD.proto`). 
+
+**If you are setting up a completely new environment or just cloned this repository, you must install Git LFS and pull the actual model files. Without this step, your simulator will fail to load the robot because it will only have small text pointer files instead of the real 3D models.**
 
 ```bash
-# Install Git LFS
+# 1. Install Git LFS
 sudo apt update
 sudo apt install git-lfs
+
+# 2. Set up Git LFS for your user account
 git lfs install
+
+# 3. Download the actual model files (replaces pointer files with real models)
+git lfs pull
 ```
+
+### 🐳 For Docker Users
+If you are using Docker, **where you install Git LFS depends on your setup**:
+
+- **Scenario A: Volume Mount / Local Development (Most Common)**
+  If you clone the repository on your host machine and mount it into the Docker container (e.g., as a ROS2 workspace), you should install Git LFS and run `git lfs pull` on your **Host Machine (your actual computer)** *before* starting the container. The Docker container will simply read the downloaded large files from the mounted folder. You don't need `git lfs` inside the container for this.
+
+- **Scenario B: Cloning inside a Dockerfile**
+  If your `Dockerfile` is responsible for cloning the repository during the image build process, you must install `git-lfs` inside the `Dockerfile` before the `git clone` step:
+  ```dockerfile
+  # In your Dockerfile
+  RUN apt-get update && apt-get install -y git git-lfs \
+      && git lfs install
+  RUN git clone <your-repo-url>
+  ```
+
+### ROS2 Dependencies
+Install the Webots ROS2 driver and ensure the message package is built before running the simulation:
 
 ```bash
 # Install Webots ROS2 driver

@@ -167,6 +167,7 @@ class LegManager:
         self.cmd_trq_l = 0.0
         self.cmd_trq_r = 0.0
         self.basic_time_step = basic_time_step
+        self.dt = basic_time_step / 1000.0
         self.Max_Torque = Max_Torque
         
         for name in motor_names:
@@ -220,9 +221,8 @@ class LegManager:
             self.prev_pos_l = pos_l
         
         # 計算速度 (rad/s) - 使用數值微分
-        dt = self.basic_time_step / 1000.0  # 轉換為秒
-        vel_r = (pos_r - self.prev_pos_r) / dt
-        vel_l = (pos_l - self.prev_pos_l) / dt
+        vel_r = (pos_r - self.prev_pos_r) / self.dt
+        vel_l = (pos_l - self.prev_pos_l) / self.dt
         # 速度低通濾波
         vel_r = alpha * vel_r + (1 - alpha) * self.prev_vel_r
         vel_l = alpha * vel_l + (1 - alpha) * self.prev_vel_l
@@ -244,8 +244,8 @@ class LegManager:
         err_r = cmd_R - pos_r
         
         # 積分項累積（含 anti-windup 限幅）
-        self.int_err_r += err_r * dt
-        self.int_err_l += err_l * dt
+        self.int_err_r += err_r * self.dt
+        self.int_err_l += err_l * self.dt
         if ki_r != 0.0:
             windup_r = self.Max_Torque / abs(ki_r)
             self.int_err_r = max(-windup_r, min(windup_r, self.int_err_r))
@@ -397,6 +397,23 @@ class CorgiDriver:
             1
         )
 
+        # Body velocity publisher (base_link frame)
+        self.body_velocity_pub = self.__node.create_publisher(
+            Vector3,
+            'sim/body/velocity',
+            1
+        )
+
+        # Position-differentiated velocity states
+        self.prev_body_pos_world = None
+        self.prev_body_vel_world = np.zeros(3)
+        self.curr_body_vel_world = np.zeros(3)
+        self.curr_body_vel_body = np.zeros(3)
+        self.body_vel_lpf_cutoff_hz = 10.0
+        self.dt = self.__timestep / 1000.0
+        tau = 1.0 / (2.0 * math.pi * self.body_vel_lpf_cutoff_hz)
+        self.body_vel_lpf_alpha = self.dt / (tau + self.dt)
+
         # Enable 16 TouchSensor bumpers (one per RIM frame)
         self._bumper_sensors = {}  # (module, rim_field) → TouchSensor
         for m in 'ABCD':
@@ -418,7 +435,25 @@ class CorgiDriver:
         
         # Pause simulation at the beginning
         self.__robot.simulationSetMode(Supervisor.SIMULATION_MODE_PAUSE)
-        
+
+    def _axis_angle_to_quat(self, rot):
+        half_angle = rot[3] / 2.0
+        sin_half = math.sin(half_angle)
+        return np.array([
+            rot[0] * sin_half,
+            rot[1] * sin_half,
+            rot[2] * sin_half,
+            math.cos(half_angle)
+        ])
+
+    def _quat_to_rot_matrix(self, q):
+        x, y, z, w = q
+        return np.array([
+            [1 - 2*(y*y + z*z), 2*(x*y + z*w),     2*(x*z - y*w)    ],
+            [2*(x*y - z*w),     1 - 2*(x*x + z*z), 2*(y*z + x*w)    ],
+            [2*(x*z + y*w),     2*(y*z - x*w),     1 - 2*(x*x + y*y)],
+        ])
+
     # Motor Command callback
     def cb_motor(self, msg):
         """
@@ -552,7 +587,7 @@ class CorgiDriver:
             )
     
     def pub_tf(self):
-        # B. 發布 TF (完美的里程計)
+        # B. 發布 TF (完美的里程計) + 機體速度
         if self.__self_node:
             # 取得絕對位置 (X, Y, Z)
             pos = self.__self_node.getPosition()
@@ -563,24 +598,54 @@ class CorgiDriver:
                 # 將 Axis-Angle 轉換為 Quaternion (x, y, z, w)
                 half_angle = rot[3] / 2
                 sin_half = math.sin(half_angle)
-                
+
                 t = TransformStamped()
                 # ros_time_msg = Time()
                 t.header.stamp = self.ros_time_msg
                 t.header.frame_id = "odom"       # 父座標 (世界)
                 t.child_frame_id = "base_link"   # 子座標 (機器人本體)
-                
+
                 t.transform.translation.x = pos[0]
                 t.transform.translation.y = pos[1]
                 t.transform.translation.z = pos[2]
-                
+
                 # 計算四元數
                 t.transform.rotation.x = rot[0] * sin_half
                 t.transform.rotation.y = rot[1] * sin_half
                 t.transform.rotation.z = rot[2] * sin_half
                 t.transform.rotation.w = math.cos(half_angle)
-                
+
                 self.tf_broadcaster.sendTransform(t)
+
+                # Position differentiation + first-order LPF in world frame,
+                # then rotate to base_link frame.
+                pos_world = np.array(pos)
+                alpha = self.body_vel_lpf_alpha
+
+                q = self._axis_angle_to_quat(rot)
+                q_norm = np.linalg.norm(q)
+
+                if self.prev_body_pos_world is None:
+                    vel_world = np.zeros(3)
+                else:
+                    vel_world_raw = (pos_world - self.prev_body_pos_world) / self.dt
+                    vel_world = alpha * vel_world_raw + (1.0 - alpha) * self.prev_body_vel_world
+
+                if q_norm > 1e-9:
+                    q = q / q_norm
+                    rot_body_to_world = self._quat_to_rot_matrix(q)
+                    vel_body = rot_body_to_world.T @ vel_world
+                else:
+                    vel_body = vel_world
+
+                self.prev_body_pos_world = pos_world
+                self.prev_body_vel_world = vel_world
+                self.curr_body_vel_world = vel_world
+                self.curr_body_vel_body = vel_body
+
+                self.body_velocity_pub.publish(
+                    Vector3(x=float(vel_body[0]), y=float(vel_body[1]), z=float(vel_body[2]))
+                )
     
     def pub_imu(self):
         time_stamp = Time()
@@ -668,7 +733,7 @@ class CorgiDriver:
         self.execute_motor()
         
         # === 4. pub datas ===
-        # TF
+        # TF + Body Velocity
         self.pub_tf()
         # Motor State
         self.pub_motor_state()

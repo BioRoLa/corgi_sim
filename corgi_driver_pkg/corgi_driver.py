@@ -352,7 +352,8 @@ class LegManager:
         
         msg = MotorState()
         theta, beta = self.tb.FK(pos_l, pos_r)
-        msg.theta, msg.beta = float(theta), float(beta)
+        msg.theta = float(theta * self.dir_theta)
+        msg.beta = float(beta * self.dir_beta)
         msg.gamma = float(pos_h)
         
         # 直接使用控制器中計算的速度（已經過濾波）
@@ -574,8 +575,8 @@ class CorgiDriver:
                 beta  = cmd[f"{leg_id}_Beta"]  * leg.dir_beta
                 motor_debug_msg += leg.set_target(
                     theta, beta,
-                    self.KP, self.KP,
-                    self.KD, self.KD,
+                    cmd[f"{leg_id}_kp_r"], cmd[f"{leg_id}_kp_l"],
+                    cmd[f"{leg_id}_kd_r"], cmd[f"{leg_id}_kd_l"],
                     cmd[f"{leg_id}_torque_r"] + self.trq_feedforward,
                     cmd[f"{leg_id}_torque_l"] + self.trq_feedforward,
                 )

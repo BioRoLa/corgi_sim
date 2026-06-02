@@ -49,6 +49,20 @@ Solid {
   }
 }
 Solid {
+  translation 0.59 -1 0.015
+  children [
+    DEF BOX Shape {
+      geometry Box {
+        size 0.1 0.1 0.03
+      }
+    }
+  ]
+  name "solid(5)"
+  boundingObject USE BOX
+  physics Physics {
+  }
+}
+Solid {
   translation 0 -0.6 0.025
   children [
     DEF BOX Shape {
@@ -93,7 +107,6 @@ Solid {
 CorgiRobot {
   translation 0 0 0.4
 }
-
 Robot {
   translation 1 0 0
   children [

@@ -11,8 +11,8 @@ WorldInfo {
   optimalThreadCount 4
 }
 Viewpoint {
-  orientation -0.2166769342239971 0.370004428779659 0.9034090041939631 1.1502565454646942
-  position -1.35706370048436 -3.217058412053156 1.88260450377176
+  orientation -0.21175732680073486 0.3743702800356476 0.9027766766882259 1.1194417510713472
+  position -1.5059003858095599 -3.168654986923497 1.8189423919088137
 }
 TexturedBackground {
 }
@@ -39,14 +39,12 @@ Solid {
   children [
     DEF BOX Shape {
       geometry Box {
-        size 0.4 0.1 0.05
+        size 0.15 0.1 0.05
       }
     }
   ]
   name "solid(2)"
   boundingObject USE BOX
-  physics Physics {
-  }
 }
 Solid {
   translation 0.59 -1 0.015
@@ -59,50 +57,42 @@ Solid {
   ]
   name "solid(5)"
   boundingObject USE BOX
-  physics Physics {
-  }
 }
 Solid {
   translation 0 -0.6 0.025
   children [
     DEF BOX Shape {
       geometry Box {
-        size 0.4 0.1 0.05
+        size 0.15 0.1 0.05
       }
     }
   ]
   name "solid(1)"
   boundingObject USE BOX
-  physics Physics {
-  }
 }
 Solid {
   translation -0.5 -0.6 0.025
   children [
     DEF BOX Shape {
       geometry Box {
-        size 0.4 0.1 0.05
+        size 0.15 0.1 0.05
       }
     }
   ]
   name "solid(3)"
   boundingObject USE BOX
-  physics Physics {
-  }
 }
 Solid {
   translation -0.5 -1 0.025
   children [
     DEF BOX Shape {
       geometry Box {
-        size 0.4 0.1 0.05
+        size 0.15 0.1 0.05
       }
     }
   ]
   name "solid(4)"
   boundingObject USE BOX
-  physics Physics {
-  }
 }
 CorgiRobot {
   translation 0 0 0.4

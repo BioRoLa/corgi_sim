@@ -48,6 +48,7 @@ def generate_launch_description():
     # 且 name 必須設為 'Force Plate'
     force_plate_driver = WebotsController(
         robot_name='Force Plate', # 對應 .wbt 中 ForcePlate 的 name
+        port=webots_port,
         parameters=[
             {
                 'robot_description': os.path.join(package_dir, 'resource', 'force_plate.urdf')

@@ -1,7 +1,6 @@
 import rclpy
 import math
 import os
-import yaml
 
 # --- Webots 控制器模組 (用於控制模擬狀態) ---
 from controller import Supervisor
@@ -21,15 +20,25 @@ from corgi_msgs.msg import RobotStateStamped
 
 from . import Controller_TB
 from .LegModel import LegModel
-from .motor_config import LEG_CONFIG
+from .motor_config import LEG_CONFIG as DEFAULT_LEG_CONFIG
 
 
 def _load_leg_config():
     """從與本模組相同目錄的 motor_config.yaml 讀取關節方向設定。
     修改 YAML 後直接重啟 Webots 即可，不需要 colcon build。"""
+    try:
+        import yaml
+    except ModuleNotFoundError:
+        print("PyYAML is not available; using motor_config.py defaults.")
+        return DEFAULT_LEG_CONFIG
+
     yaml_path = os.path.join(os.path.dirname(__file__), 'motor_config.yaml')
-    with open(yaml_path, 'r') as f:
-        return yaml.safe_load(f)
+    try:
+        with open(yaml_path, 'r') as f:
+            return yaml.safe_load(f)
+    except OSError:
+        print(f"{yaml_path} is not available; using motor_config.py defaults.")
+        return DEFAULT_LEG_CONFIG
 
 
 LEG_CONFIG = _load_leg_config()

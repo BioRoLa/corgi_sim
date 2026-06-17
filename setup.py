@@ -21,7 +21,7 @@ setup(
         (os.path.join('share', package_name, 'resource'),
             glob('resource/*')),
     ],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'PyYAML'],
     zip_safe=True,
     maintainer='yisyuan',
     maintainer_email='r12522823@ntu.edu.tw',

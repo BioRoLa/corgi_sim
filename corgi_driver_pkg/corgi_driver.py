@@ -585,8 +585,8 @@ class CorgiDriver:
                     theta, beta,
                     cmd[f"{leg_id}_kp_r"], cmd[f"{leg_id}_kp_l"],
                     cmd[f"{leg_id}_kd_r"], cmd[f"{leg_id}_kd_l"],
-                    -cmd[f"{leg_id}_torque_r"],
                     -cmd[f"{leg_id}_torque_l"],
+                    -cmd[f"{leg_id}_torque_r"],
                 )
                 leg.set_abad(
                     cmd[f"{leg_id}_Gamma"],

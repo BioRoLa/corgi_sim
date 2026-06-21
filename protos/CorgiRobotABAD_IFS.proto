@@ -76,11 +76,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "A_Module_L_Motor"
+                    name "A_Module_R_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "A_Module_L_Motor_sensor"
+                    name "A_Module_R_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -2981,7 +2981,7 @@ Robot{
                       }
                     }
                   ]
-                  name "A_Module_L_Motor"
+                  name "A_Module_R_Motor"
                   boundingObject IndexedFaceSet {
       creaseAngle 1.0
       coord Coordinate {
@@ -3417,11 +3417,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "A_Module_R_Motor"
+                    name "A_Module_L_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "A_Module_R_Motor_sensor"
+                    name "A_Module_L_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -6319,7 +6319,7 @@ Robot{
                       }
                     }
                   ]
-                  name "A_Module_R_Motor"
+                  name "A_Module_L_Motor"
                   boundingObject IndexedFaceSet {
       creaseAngle 1.0
       coord Coordinate {
@@ -7303,11 +7303,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "B_Module_R_Motor"
+                    name "B_Module_L_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "B_Module_R_Motor_sensor"
+                    name "B_Module_L_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -10205,7 +10205,7 @@ Robot{
                       }
                     }
                   ]
-                  name "B_Module_R_Motor"
+                  name "B_Module_L_Motor"
                   boundingObject IndexedFaceSet {
       creaseAngle 1.0
       coord Coordinate {
@@ -10642,11 +10642,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "B_Module_L_Motor"
+                    name "B_Module_R_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "B_Module_L_Motor_sensor"
+                    name "B_Module_R_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -13547,7 +13547,7 @@ Robot{
                       }
                     }
                   ]
-                  name "B_Module_L_Motor"
+                  name "B_Module_R_Motor"
                   boundingObject IndexedFaceSet {
       creaseAngle 1.0
       coord Coordinate {
@@ -14517,11 +14517,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "C_Module_L_Motor"
+                    name "C_Module_R_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "C_Module_L_Motor_sensor"
+                    name "C_Module_R_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -17422,7 +17422,7 @@ Robot{
                       }
                     }
                   ]
-                  name "C_Module_L_Motor"
+                  name "C_Module_R_Motor"
                   boundingObject IndexedFaceSet {
       creaseAngle 1.0
       coord Coordinate {
@@ -17858,11 +17858,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "C_Module_R_Motor"
+                    name "C_Module_L_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "C_Module_R_Motor_sensor"
+                    name "C_Module_L_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -20760,7 +20760,7 @@ Robot{
                       }
                     }
                   ]
-                  name "C_Module_R_Motor"
+                  name "C_Module_L_Motor"
                   boundingObject IndexedFaceSet {
       creaseAngle 1.0
       coord Coordinate {
@@ -21754,11 +21754,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "D_Module_R_Motor"
+                    name "D_Module_L_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "D_Module_R_Motor_sensor"
+                    name "D_Module_L_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -25093,11 +25093,11 @@ Robot{
                 }
                 device [
                   RotationalMotor {
-                    name "D_Module_L_Motor"
+                    name "D_Module_R_Motor"
                     maxTorque 10000
                   }
                   PositionSensor {
-                    name "D_Module_L_Motor_sensor"
+                    name "D_Module_R_Motor_sensor"
                   }
                 ]
                 endPoint Solid {
@@ -27998,7 +27998,7 @@ Robot{
                       }
                     }
                   ]
-                  name "D_Module_L_Motor"
+                  name "D_Module_R_Motor"
                   boundingObject IndexedFaceSet {
       creaseAngle 1.0
       coord Coordinate {

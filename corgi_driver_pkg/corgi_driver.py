@@ -274,17 +274,17 @@ class LegManager:
         self.current_vel_l = vel_l
         self.current_vel_r = vel_r
         
-        # 處理角度連續性（避免 ±π 跳變）
-        cmd_R = self._find_closest_phi(cmd_R, pos_r)
-        cmd_L = self._find_closest_phi(cmd_L, pos_l)
+        # Convert mechanism coordinates to Webots motor coordinates.
+        cmd_R_motor = self._find_closest_phi(cmd_R * self.dir_motor_r, pos_r)
+        cmd_L_motor = self._find_closest_phi(cmd_L * self.dir_motor_l, pos_l)
         
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
         trq_r, err_r = self._apply_torque_control(
-            "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
+            "R_Motor", cmd_R_motor, pos_r, vel_r,
             kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r
         )
         trq_l, err_l = self._apply_torque_control(
-            "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
+            "L_Motor", cmd_L_motor, pos_l, vel_l,
             kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l
         )
         
@@ -294,7 +294,7 @@ class LegManager:
         
         # print debug info
         return "".join([f"[{self.prefix}] Target θ: {theta:.3f} rad, β: {beta:.3f} rad | ",
-                                      f"Cmd L: {cmd_L:.3f} rad, R: {cmd_R:.3f} rad | ",
+                                      f"Cmd L: {cmd_L_motor:.3f} rad, R: {cmd_R_motor:.3f} rad | ",
                                       f"Pos L: {pos_l:.3f} rad, R: {pos_r:.3f} rad | ",
                                       f"Err L: {err_l:.3f} rad, R: {err_r:.3f} rad | ",
                                       f"Vel L: {vel_l:.3f} rad/s, R: {vel_r:.3f} rad/s | ",
@@ -360,19 +360,20 @@ class LegManager:
         pos_h = self.sensor_abad.getValue() * self.dir_abad if self.sensor_abad else 0.0
         
         msg = MotorState()
-        theta, beta = self.tb.FK(pos_l, pos_r)
-        msg.theta, msg.beta = float(theta), -float(beta)
+        theta, beta = self.tb.FK(pos_l * self.dir_motor_l, pos_r * self.dir_motor_r)
+        msg.theta = float(theta * self.dir_theta)
+        msg.beta = float(beta * self.dir_beta)
         msg.gamma = float(pos_h)
         
         # 直接使用控制器中計算的速度（已經過濾波）
-        msg.velocity_l = -float(self.current_vel_l)
-        msg.velocity_r = -float(self.current_vel_r)
-        msg.velocity_h = -float(self.current_vel_h)
+        msg.velocity_l = float(self.current_vel_l * self.dir_motor_l)
+        msg.velocity_r = float(self.current_vel_r * self.dir_motor_r)
+        msg.velocity_h = float(self.current_vel_h)
         
         # 發布扭矩命令值（命令扭矩，而非回饋）
-        msg.torque_r = -float(self.cmd_trq_r)
-        msg.torque_l = -float(self.cmd_trq_l)
-        msg.torque_h = -float(self.cmd_trq_h)
+        msg.torque_r = float(self.cmd_trq_r * self.dir_motor_r)
+        msg.torque_l = float(self.cmd_trq_l * self.dir_motor_l)
+        msg.torque_h = float(self.cmd_trq_h)
         return msg
     
 class CorgiDriver:
@@ -585,14 +586,14 @@ class CorgiDriver:
                     theta, beta,
                     cmd[f"{leg_id}_kp_r"], cmd[f"{leg_id}_kp_l"],
                     cmd[f"{leg_id}_kd_r"], cmd[f"{leg_id}_kd_l"],
-                    -cmd[f"{leg_id}_torque_l"],
-                    -cmd[f"{leg_id}_torque_r"],
+                    cmd[f"{leg_id}_torque_r"],
+                    cmd[f"{leg_id}_torque_l"],
                 )
                 leg.set_abad(
                     cmd[f"{leg_id}_Gamma"],
                     cmd[f"{leg_id}_kp_h"],
                     cmd[f"{leg_id}_kd_h"],
-                    -cmd[f"{leg_id}_torque_h"],
+                    cmd[f"{leg_id}_torque_h"],
                 )
                 leg.update_g_joint(theta, beta)
                 motor_debug_msg += "\n"

@@ -38,7 +38,7 @@ Robot{
     }
     HingeJoint {
       jointParameters HingeJointParameters {
-        axis -1 -4e-06 4e-06
+        axis 1 -4e-06 4e-06
         anchor 0.255 0.12 0.057166
       }
       device [
@@ -7265,7 +7265,7 @@ Robot{
     }
     HingeJoint {
       jointParameters HingeJointParameters {
-        axis -1 -4e-06 4e-06
+        axis 1 -4e-06 4e-06
         anchor 0.255 -0.12 0.057166
       }
       device [
@@ -14479,7 +14479,7 @@ Robot{
     }
     HingeJoint {
       jointParameters HingeJointParameters {
-        axis 1 -4e-06 4e-06
+        axis -1 -4e-06 4e-06
         anchor -0.255 -0.12 0.057166
       }
       device [
@@ -21716,7 +21716,7 @@ Robot{
     }
     HingeJoint {
       jointParameters HingeJointParameters {
-        axis 1 -4e-06 4e-06
+        axis -1 -4e-06 4e-06
         anchor -0.255 0.12 0.057166
       }
       device [

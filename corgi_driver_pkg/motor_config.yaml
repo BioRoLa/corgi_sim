@@ -17,9 +17,9 @@ A:
     beta: 1.0
     g_joint_beta: -1.0
   motor_dir:
-    L: -1.0
-    R: -1.0
-    ABAD: -1.0
+    L: 1.0
+    R: 1.0
+    ABAD: 1.0
 
 B:
   joint_dir:
@@ -27,8 +27,8 @@ B:
     beta: 1.0
     g_joint_beta: -1.0
   motor_dir:
-    L: -1.0
-    R: -1.0
+    L: 1.0
+    R: 1.0
     ABAD: 1.0
 
 C:
@@ -37,9 +37,9 @@ C:
     beta: 1.0
     g_joint_beta: -1.0
   motor_dir:
-    L: -1.0
-    R: -1.0
-    ABAD: -1.0
+    L: 1.0
+    R: 1.0
+    ABAD: 1.0
 
 D:
   joint_dir:
@@ -47,6 +47,6 @@ D:
     beta: 1.0
     g_joint_beta: -1.0
   motor_dir:
-    L: -1.0
-    R: -1.0
+    L: 1.0
+    R: 1.0
     ABAD: 1.0

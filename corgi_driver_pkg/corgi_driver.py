@@ -397,10 +397,12 @@ class CorgiDriver:
         self.tf_broadcaster = TransformBroadcaster(self.__node) 
         
         # Fixed PID parameters (not using ROS2 parameter)
-        # TUNED Params
-        self.KP = 90.0
+        # TUNED Params — updated from PID sweep 2026-06-29
+        self.KP = 120.0      # leg (theta/beta) proportional gain
         self.KI = 0.0
-        self.KD = 1.75
+        self.KD = 0.25       # leg derivative gain
+        self.GAMMA_KP = 150.0  # abad gamma proportional gain
+        self.GAMMA_KD = 1.75   # abad gamma derivative gain
         # self.Max_Torque = self.KP if self.KP > 35.0 else 35.0
         self.Max_Torque = 35.0
         self.trq_feedforward = 0  # N·m 前饋扭矩
@@ -605,7 +607,7 @@ class CorgiDriver:
                     self.KD, self.KD,
                     0.0, 0.0,
                 )
-                leg.set_abad(self.default_gamma, self.KP, self.KD, 0.0)
+                leg.set_abad(self.default_gamma, self.GAMMA_KP, self.GAMMA_KD, 0.0)
     
     def pub_tf(self):
         # B. 發布 TF (完美的里程計)

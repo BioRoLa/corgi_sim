@@ -18,6 +18,7 @@ from corgi_msgs.msg import MotorCmdStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
 from corgi_msgs.msg import RobotStateStamped
+from corgi_msgs.msg import SimLegContactStamped, SimLegContact
 
 from . import Controller_TB
 from .LegModel import LegModel
@@ -454,7 +455,22 @@ class CorgiDriver:
             'robot/state',
             1
         )
-        
+
+        # Contact state publisher
+        self.contact_pub = self.__node.create_publisher(
+            SimLegContactStamped,
+            'sim/leg_contact',
+            1000
+        )
+        # DEF node handles for Supervisor contact detection
+        self.contact_nodes = {}
+        for leg_id in ('A', 'B', 'C', 'D'):
+            self.contact_nodes[leg_id] = {
+                'foot':    self.__robot.getFromDef(f"{leg_id}_FOOT"),
+                'wheel_l': self.__robot.getFromDef(f"{leg_id}_WHEEL_L"),
+                'wheel_r': self.__robot.getFromDef(f"{leg_id}_WHEEL_R"),
+            }
+
         # Initialize loop counter
         self.loop_counter = 0
         
@@ -687,6 +703,35 @@ class CorgiDriver:
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
     
+    def pub_contact(self):
+        msg = SimLegContactStamped()
+        msg.header.seq = self.loop_counter
+        msg.header.stamp = self.ros_time_msg
+
+        module_map = {
+            'A': msg.module_a,
+            'B': msg.module_b,
+            'C': msg.module_c,
+            'D': msg.module_d,
+        }
+        for leg_id, module in module_map.items():
+            nodes = self.contact_nodes[leg_id]
+            try:
+                foot_contact = len(nodes['foot'].getContactPoints()) > 0 if nodes['foot'] else False
+                wl_contact   = len(nodes['wheel_l'].getContactPoints()) > 0 if nodes['wheel_l'] else False
+                wr_contact   = len(nodes['wheel_r'].getContactPoints()) > 0 if nodes['wheel_r'] else False
+            except Exception:
+                foot_contact = wl_contact = wr_contact = False
+
+            # WHEEL_L covers both upper/lower left arc; WHEEL_R covers both right arcs
+            module.rim_ul = wl_contact
+            module.rim_ll = wl_contact
+            module.rim_lr = wr_contact
+            module.rim_ur = wr_contact
+            module.contact = foot_contact or wl_contact or wr_contact
+
+        self.contact_pub.publish(msg)
+
     # Webots main loop, Webots will call this function
     def step(self):
         # === 1. pub clock ===
@@ -707,5 +752,7 @@ class CorgiDriver:
         self.pub_imu()
         # FSM
         self.pub_fsm()
+        # Contact State
+        self.pub_contact()
         
         self.loop_counter += 1

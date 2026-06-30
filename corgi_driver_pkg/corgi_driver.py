@@ -462,14 +462,13 @@ class CorgiDriver:
             'sim/leg_contact',
             1000
         )
-        # DEF node handles for Supervisor contact detection
-        self.contact_nodes = {}
-        for leg_id in ('A', 'B', 'C', 'D'):
-            self.contact_nodes[leg_id] = {
-                'foot':    self.__robot.getFromDef(f"{leg_id}_FOOT"),
-                'wheel_l': self.__robot.getFromDef(f"{leg_id}_WHEEL_L"),
-                'wheel_r': self.__robot.getFromDef(f"{leg_id}_WHEEL_R"),
-            }
+        # Contact detection: getContactPoints(includeDescendants=True) every 100 steps,
+        # result assigned via nearest-module (not quadrant) to avoid cross-boundary bleed.
+        self._contact_cache = set()
+        self._contact_update_interval = 100
+        # Module hip positions in robot body frame: A front-left, B front-right, C rear-right, D rear-left
+        self._MODULE_XY = {'A': (0.255, 0.12), 'B': (0.255, -0.12),
+                           'C': (-0.255, -0.12), 'D': (-0.255, 0.12)}
 
         # Initialize loop counter
         self.loop_counter = 0
@@ -477,6 +476,7 @@ class CorgiDriver:
         # --- Experiment Mode ---
         self.experiment_mode = os.environ.get('CORGI_EXPERIMENT_MODE', '0') == '1'
         self.support_box_removed = False
+        self._support_box_removed_step = -1  # skip contact for 1 step after removal
         
         if self.experiment_mode:
             self.__node.get_logger().info("[Experiment Mode] Skipping initial pause. Subscribing to /trigger for support box removal.")
@@ -503,6 +503,7 @@ class CorgiDriver:
                 if box_node:
                     box_node.remove()
                     self.support_box_removed = True
+                    self._support_box_removed_step = self.loop_counter
                     self.__node.get_logger().info(
                         "[Experiment Mode] Support box removed! Robot is now free-standing."
                     )
@@ -708,27 +709,62 @@ class CorgiDriver:
         msg.header.seq = self.loop_counter
         msg.header.stamp = self.ros_time_msg
 
+        contact_set = set()
+        n_cp_total  = 0
+        n_cp_ground = 0
+
+        # Skip for 1 step immediately after support box removal (avoid Webots segfault on stale physics)
+        if self.loop_counter <= self._support_box_removed_step + 1:
+            self.contact_pub.publish(msg)
+            return
+
+        # Only refresh contact points every N steps
+        if self.loop_counter % self._contact_update_interval == 0:
+            contact_set = set()
+            try:
+                pos = self.__self_node.getPosition()
+                R   = self.__self_node.getOrientation()
+                cps = self.__self_node.getContactPoints(includeDescendants=True)
+                n_cp_total = len(cps)
+
+                for cp in cps:
+                    pw = cp.getPoint()
+                    if pw[2] > 0.02:
+                        continue
+                    n_cp_ground += 1
+                    # Transform to robot body frame
+                    dx, dy, dz = pw[0]-pos[0], pw[1]-pos[1], pw[2]-pos[2]
+                    bx = R[0]*dx + R[3]*dy + R[6]*dz
+                    by = R[1]*dx + R[4]*dy + R[7]*dz
+                    # Assign to nearest module (avoids cross-quadrant bleed from arc geometry)
+                    best, best_d = 'A', float('inf')
+                    for leg_id, (mx, my) in self._MODULE_XY.items():
+                        d = (bx-mx)**2 + (by-my)**2
+                        if d < best_d:
+                            best_d, best = d, leg_id
+                    contact_set.add(best)
+
+                self._contact_cache = contact_set
+                if self.loop_counter % 1000 == 0:
+                    self.__node.get_logger().info(
+                        f"[Contact] legs={contact_set} n_cp={n_cp_total} ground={n_cp_ground}"
+                    )
+            except Exception as e:
+                if self.loop_counter % 5000 == 0:
+                    self.__node.get_logger().warn(f"[Contact] error: {e}")
+        else:
+            contact_set = self._contact_cache
+
         module_map = {
-            'A': msg.module_a,
-            'B': msg.module_b,
-            'C': msg.module_c,
-            'D': msg.module_d,
+            'A': msg.module_a, 'B': msg.module_b,
+            'C': msg.module_c, 'D': msg.module_d,
         }
         for leg_id, module in module_map.items():
-            nodes = self.contact_nodes[leg_id]
-            try:
-                foot_contact = len(nodes['foot'].getContactPoints()) > 0 if nodes['foot'] else False
-                wl_contact   = len(nodes['wheel_l'].getContactPoints()) > 0 if nodes['wheel_l'] else False
-                wr_contact   = len(nodes['wheel_r'].getContactPoints()) > 0 if nodes['wheel_r'] else False
-            except Exception:
-                foot_contact = wl_contact = wr_contact = False
-
-            # WHEEL_L covers both upper/lower left arc; WHEEL_R covers both right arcs
-            module.rim_ul = wl_contact
-            module.rim_ll = wl_contact
-            module.rim_lr = wr_contact
-            module.rim_ur = wr_contact
-            module.contact = foot_contact or wl_contact or wr_contact
+            module.contact = leg_id in contact_set
+            module.rim_ul = module.contact
+            module.rim_ll = module.contact
+            module.rim_lr = module.contact
+            module.rim_ur = module.contact
 
         self.contact_pub.publish(msg)
 
@@ -736,23 +772,19 @@ class CorgiDriver:
     def step(self):
         # === 1. pub clock ===
         self.pub_clock()
-        
+
         # === 2. process ros2 communication ===
         rclpy.spin_once(self.__node, timeout_sec=0)
-        
-        # === 3. control logic  ===
+
+        # === 3. control logic ===
         self.execute_motor()
-        
+
         # === 4. pub datas ===
-        # TF
         self.pub_tf()
-        # Motor State
         self.pub_motor_state()
-        # IMU
         self.pub_imu()
-        # FSM
         self.pub_fsm()
         # Contact State
         self.pub_contact()
-        
+
         self.loop_counter += 1

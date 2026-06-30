@@ -14,34 +14,24 @@
 A:
   joint_dir:
     theta: 1.0
-    beta: -1.0
+    beta: 1.0
     g_joint_beta: -1.0
   motor_dir:
     L: 1.0
     R: 1.0
-    ABAD: -1.0
+    ABAD: 1.0
 
 B:
   joint_dir:
     theta: 1.0
-    beta: 1.0
-    g_joint_beta: -1.0
-  motor_dir:
-    L: 1.0
-    R: 1.0
-    ABAD: 1.0
-
-C:
-  joint_dir:
-    theta: 1.0
-    beta: 1.0
+    beta: -1.0
     g_joint_beta: -1.0
   motor_dir:
     L: 1.0
     R: 1.0
     ABAD: -1.0
 
-D:
+C:
   joint_dir:
     theta: 1.0
     beta: -1.0
@@ -50,3 +40,13 @@ D:
     L: 1.0
     R: 1.0
     ABAD: 1.0
+
+D:
+  joint_dir:
+    theta: 1.0
+    beta: 1.0
+    g_joint_beta: -1.0
+  motor_dir:
+    L: 1.0
+    R: 1.0
+    ABAD: -1.0

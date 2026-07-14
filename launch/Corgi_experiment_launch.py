@@ -33,7 +33,7 @@ def generate_launch_description():
     
     world_arg = DeclareLaunchArgument(
         'world',
-        default_value='Corgi_ABAD_experiment.wbt',
+        default_value='Corgi_ABAD.wbt',
         description='Choose the world file name'
     )
 

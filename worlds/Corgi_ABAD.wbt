@@ -26,7 +26,7 @@ Viewpoint {
   followType "Pan and Tilt Shot"
   followSmoothness 1
 }
-Solid {
+DEF SUPPORT_BOX Solid {
   translation 0 0 -0.12
   children [
     Solid {

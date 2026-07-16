@@ -117,11 +117,14 @@ class imu:
 
 class LegManager:
     def __init__(self, robot, prefix, controller_tb, basic_time_step=1, Max_Torque=35,
-                 abad_prefix=None, leg_config=None):
+                 abad_prefix=None, leg_config=None, motor_mode='torque'):
         self.prefix = prefix
         self.motors = {}
         self.sensors = {}
         self.tb = controller_tb
+        # 'torque': 手動 PD + setTorque (預設，與實機一致)
+        # 'position': 直接 setPosition，交給 Webots 內建位置伺服 (僅用於驗證軌跡規劃)
+        self.motor_mode = motor_mode
 
         cfg = leg_config or {}
         jdir = cfg.get('joint_dir', {})
@@ -160,10 +163,12 @@ class LegManager:
             motor = robot.getDevice(full_name)
             if motor:
                 self.motors[name] = motor
-                # 設定為扭矩控制模式
-                motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
-                motor.setVelocity(0.0)           # 初始速度為 0
-                motor.enableTorqueFeedback(self.basic_time_step)
+                if self.motor_mode == 'torque':
+                    # 設定為扭矩控制模式
+                    motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
+                    motor.setVelocity(0.0)           # 初始速度為 0
+                    motor.enableTorqueFeedback(self.basic_time_step)
+                # position 模式：保留 Webots 預設位置控制，僅由 set_target() 呼叫 setPosition()
                 motor.setAvailableTorque(self.Max_Torque)
         
         # --- ABAD 馬達 (力矩控制) ---
@@ -183,9 +188,10 @@ class LegManager:
             self.motor_abad = robot.getDevice(abad_name)
             if self.motor_abad:
                 self.motors["ABAD"] = self.motor_abad
-                self.motor_abad.setPosition(float('inf'))
-                self.motor_abad.setVelocity(0.0)
-                self.motor_abad.enableTorqueFeedback(self.basic_time_step)
+                if self.motor_mode == 'torque':
+                    self.motor_abad.setPosition(float('inf'))
+                    self.motor_abad.setVelocity(0.0)
+                    self.motor_abad.enableTorqueFeedback(self.basic_time_step)
                 self.motor_abad.setAvailableTorque(self.Max_Torque)
             else:
                 print(f"Warning: 找不到 ABAD 馬達 {abad_name}")
@@ -269,20 +275,29 @@ class LegManager:
         # 處理角度連續性（避免 ±π 跳變）
         cmd_R = self._find_closest_phi(cmd_R, pos_r)
         cmd_L = self._find_closest_phi(cmd_L, pos_l)
-        
-        # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
-        trq_r, err_r = self._apply_torque_control(
-            "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
-            kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r
-        )
-        trq_l, err_l = self._apply_torque_control(
-            "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
-            kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l
-        )
-        
-        # 保存實際套用的扭矩命令
-        self.cmd_trq_r = trq_r
-        self.cmd_trq_l = trq_l
+
+        if self.motor_mode == 'position':
+            # 直接交給 Webots 內建位置伺服，PD 增益/前饋扭矩在此模式下不使用
+            self.motors["R_Motor"].setPosition(cmd_R * self.dir_motor_r)
+            self.motors["L_Motor"].setPosition(cmd_L * self.dir_motor_l)
+            err_r = cmd_R - pos_r * self.dir_motor_r
+            err_l = cmd_L - pos_l * self.dir_motor_l
+            trq_r = trq_l = 0.0
+            self.cmd_trq_r = 0.0
+            self.cmd_trq_l = 0.0
+        else:
+            # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
+            trq_r, err_r = self._apply_torque_control(
+                "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
+                kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r
+            )
+            trq_l, err_l = self._apply_torque_control(
+                "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
+                kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l
+            )
+            # 保存實際套用的扭矩命令
+            self.cmd_trq_r = trq_r
+            self.cmd_trq_l = trq_l
         
         # print debug info
         return "".join([f"[{self.prefix}] Target θ: {theta:.3f} rad, β: {beta:.3f} rad | ",
@@ -317,13 +332,18 @@ class LegManager:
         self.prev_vel_h = vel_h
 
         gamma_target = self._find_closest_phi(gamma * self.dir_abad, pos_h)
-        trq_h, _ = self._apply_torque_control(
-            "ABAD", gamma_target, pos_h, vel_h,
-            kp=kp, kd=kd, torque_ff=torque * self.dir_abad
-        )
+
+        if self.motor_mode == 'position':
+            self.motor_abad.setPosition(gamma_target)
+            self.cmd_trq_h = 0.0
+        else:
+            trq_h, _ = self._apply_torque_control(
+                "ABAD", gamma_target, pos_h, vel_h,
+                kp=kp, kd=kd, torque_ff=torque * self.dir_abad
+            )
+            self.cmd_trq_h = trq_h * self.dir_abad
 
         self.current_vel_h = vel_h * self.dir_abad
-        self.cmd_trq_h = trq_h * self.dir_abad
     
     def update_g_joint(self, theta, beta):
         """根據 theta/beta 更新 G_Joint 被動追蹤
@@ -407,7 +427,17 @@ class CorgiDriver:
         # self.Max_Torque = self.KP if self.KP > 35.0 else 35.0
         self.Max_Torque = 35.0
         self.trq_feedforward = 0  # N·m 前饋扭矩
-        
+
+        # 馬達控制模式：'torque'（預設，實機一致的手動 PD+setTorque）或 'position'
+        # （交給 Webots 內建位置伺服，僅用於驗證軌跡規劃，排除馬達動態誤差）。
+        # 未指定 CORGI_MOTOR_MODE 時預設為 torque。
+        self.motor_mode = os.environ.get('CORGI_MOTOR_MODE', 'torque').strip().lower()
+        if self.motor_mode not in ('torque', 'position'):
+            self.__node.get_logger().warn(
+                f"未知的 CORGI_MOTOR_MODE='{self.motor_mode}'，改用預設值 'torque'"
+            )
+            self.motor_mode = 'torque'
+
         # 3. initialize Legs (direction config loaded from motor_config.py)
         self.legs = {
             leg_id: LegManager(
@@ -418,6 +448,7 @@ class CorgiDriver:
                 Max_Torque=self.Max_Torque,
                 abad_prefix=leg_id,
                 leg_config=LEG_CONFIG[leg_id],
+                motor_mode=self.motor_mode,
             )
             for leg_id in ('A', 'B', 'C', 'D')
         }
@@ -493,7 +524,10 @@ class CorgiDriver:
         
         container_id = os.environ.get('HOSTNAME', 'Unknown')
         domain_id = os.environ.get('ROS_DOMAIN_ID', '???')
-        self.__node.get_logger().info(f"Driver Initialized! Connected from Container: {container_id} (Domain: {domain_id})")
+        self.__node.get_logger().info(
+            f"Driver Initialized! Connected from Container: {container_id} (Domain: {domain_id}) "
+            f"| Motor Mode: {self.motor_mode}"
+        )
         
     def _experiment_trigger_cb(self, msg):
         """[Experiment Mode] Remove support box when trigger is enabled."""

@@ -3,6 +3,8 @@ import socket
 import launch
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 from webots_ros2_driver.webots_launcher import WebotsLauncher
 from webots_ros2_driver.webots_controller import WebotsController
@@ -20,7 +22,14 @@ def generate_launch_description():
     package_dir = get_package_share_directory('corgi_sim')
     launch_user = os.environ.get('USER') or os.environ.get('USERNAME') or 'root'
     webots_port = str(_find_free_port(start_port=int(os.environ.get('WEBOTS_PORT', '1234'))))
-    
+
+    motor_mode_arg = DeclareLaunchArgument(
+        'motor_mode',
+        default_value='torque',
+        description="Motor control mode: 'torque' (手動 PD+setTorque，與實機一致) or "
+                     "'position' (Webots 內建位置伺服，用於驗證軌跡規劃)"
+    )
+
     # 1. 設定 Webots 世界檔路徑
     world_path = os.path.join(package_dir, 'worlds', "Corgi_ABAD" + ".wbt") # corgi_origin // IFS_Proto // Corgi_ABAD
 
@@ -52,8 +61,11 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        motor_mode_arg,
         launch.actions.SetEnvironmentVariable(name='USER', value=launch_user),
         launch.actions.SetEnvironmentVariable(name='USERNAME', value=launch_user),
+        # 切換馬達控制模式 (torque / position)，見 corgi_driver.py CORGI_MOTOR_MODE
+        launch.actions.SetEnvironmentVariable(name='CORGI_MOTOR_MODE', value=LaunchConfiguration('motor_mode')),
         webots,
         robot_driver,
         control_panel,

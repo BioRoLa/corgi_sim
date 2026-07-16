@@ -37,6 +37,13 @@ def generate_launch_description():
         description='Choose the world file name'
     )
 
+    motor_mode_arg = DeclareLaunchArgument(
+        'motor_mode',
+        default_value='torque',
+        description="Motor control mode: 'torque' (手動 PD+setTorque，與實機一致) or "
+                     "'position' (Webots 內建位置伺服，用於驗證軌跡規劃)"
+    )
+
     # 1. 使用實驗專用 world (Solid 有 DEF SUPPORT_BOX 可供 Supervisor 移除)
     world_path = launch.substitutions.PathJoinSubstitution([
         package_dir, 'worlds', LaunchConfiguration('world')
@@ -68,10 +75,13 @@ def generate_launch_description():
     return LaunchDescription([
         mode_arg,
         world_arg,
+        motor_mode_arg,
         launch.actions.SetEnvironmentVariable(name='USER', value=launch_user),
         launch.actions.SetEnvironmentVariable(name='USERNAME', value=launch_user),
         # 告知 driver 跳過初始 PAUSE 並啟用箱子移除邏輯
         launch.actions.SetEnvironmentVariable(name='CORGI_EXPERIMENT_MODE', value='1'),
+        # 切換馬達控制模式 (torque / position)，見 corgi_driver.py CORGI_MOTOR_MODE
+        launch.actions.SetEnvironmentVariable(name='CORGI_MOTOR_MODE', value=LaunchConfiguration('motor_mode')),
         webots,
         robot_driver,
         launch.actions.RegisterEventHandler(

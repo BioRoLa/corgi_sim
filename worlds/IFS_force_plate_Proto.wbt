@@ -11,8 +11,10 @@ WorldInfo {
   optimalThreadCount 4
 }
 Viewpoint {
-  orientation -0.23626271166150842 0.10990253332241894 0.9654539679589419 2.2973804040862613
-  position 1.9868510368785204 -1.8674425302675088 1.3789887953665663
+  orientation 0.031229482245815277 -0.03142527901210597 0.9990181035785436 1.565528689263171
+  position 0.5211242467745404 -4.579927052059747 0.38300628630531924
+  follow "CorgiRobot"
+  followType "None"
 }
 TexturedBackground {
 }
@@ -35,67 +37,7 @@ Solid {
   }
 }
 Solid {
-  translation 0.15 -1 0.045
-  children [
-    DEF BOX Shape {
-      geometry Box {
-        size 0.1 0.1 0.05
-      }
-    }
-  ]
-  name "solid(2)"
-  boundingObject USE BOX
-}
-Solid {
-  translation 1.515 -1 0.035
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 1 1 0.498039
-        metalness 0
-      }
-      geometry Box {
-        size 0.1 0.1 0.03
-      }
-    }
-  ]
-  name "solid(5)"
-  boundingObject USE BOX
-}
-Solid {
-  translation 2.155 -1 0.035
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 1 1 0.498039
-        metalness 0
-      }
-      geometry Box {
-        size 0.1 0.1 0.03
-      }
-    }
-  ]
-  name "solid(6)"
-  boundingObject USE BOX
-}
-Solid {
-  translation 1.665 -0.6 0.035
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 1 1 0.498039
-        metalness 0
-      }
-      geometry Box {
-        size 0.1 0.1 0.03
-      }
-    }
-  ]
-  name "solid(12)"
-  boundingObject USE BOX
-}
-Solid {
-  translation 1.015 -0.6 0.035
+  translation 0.345 -0.6 0.035
   children [
     DEF BOX Shape {
       appearance PBRAppearance {
@@ -108,22 +50,6 @@ Solid {
     }
   ]
   name "solid(13)"
-  boundingObject USE BOX
-}
-Solid {
-  translation 1.825 -1 0.035
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 1 1 0.498039
-        metalness 0
-      }
-      geometry Box {
-        size 0.1 0.1 0.03
-      }
-    }
-  ]
-  name "solid(10)"
   boundingObject USE BOX
 }
 Solid {
@@ -143,63 +69,7 @@ Solid {
   boundingObject USE BOX
 }
 Solid {
-  translation 1.345 -0.61 0.035
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 1 1 0.498039
-        metalness 0
-      }
-      geometry Box {
-        size 0.1 0.1 0.03
-      }
-    }
-  ]
-  name "solid(19)"
-  boundingObject USE BOX
-}
-Solid {
-  translation 1.005 -1 0.035
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 1 1 0.498039
-        metalness 0
-      }
-      geometry Box {
-        size 0.1 0.1 0.03
-      }
-    }
-  ]
-  name "solid(18)"
-  boundingObject USE BOX
-}
-Solid {
-  translation -0.02 -0.6 0.045
-  children [
-    DEF BOX Shape {
-      geometry Box {
-        size 0.1 0.1 0.05
-      }
-    }
-  ]
-  name "solid(1)"
-  boundingObject USE BOX
-}
-Solid {
-  translation -0.37 -0.6 0.045
-  children [
-    DEF BOX Shape {
-      geometry Box {
-        size 0.1 0.1 0.05
-      }
-    }
-  ]
-  name "solid(3)"
-  boundingObject USE BOX
-}
-Solid {
-  translation -0.26 -0.8 0.01
+  translation -0.27 -0.8 0.01
   children [
     DEF BOX Shape {
       appearance PBRAppearance {
@@ -215,7 +85,7 @@ Solid {
   boundingObject USE BOX
 }
 Solid {
-  translation 0.43 -0.8 0.01
+  translation 0.28 -0.8 0.01
   children [
     DEF BOX Shape {
       appearance PBRAppearance {
@@ -231,7 +101,7 @@ Solid {
   boundingObject USE BOX
 }
 Solid {
-  translation 1.13 -0.8 0.01
+  translation 1.36 -0.8 0.01
   children [
     DEF BOX Shape {
       appearance PBRAppearance {
@@ -246,55 +116,11 @@ Solid {
   name "solid(9)"
   boundingObject USE BOX
 }
-Solid {
-  translation 1.81 -0.8 0.01
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 0 0 0
-        metalness 0
-      }
-      geometry Box {
-        size 0.7 0.5 0.02
-      }
-    }
-  ]
-  name "solid(16)"
-  boundingObject USE BOX
-}
-Solid {
-  translation 2.49 -0.8 0.01
-  children [
-    DEF BOX Shape {
-      appearance PBRAppearance {
-        baseColor 0 0 0
-        metalness 0
-      }
-      geometry Box {
-        size 0.7 0.5 0.02
-      }
-    }
-  ]
-  name "solid(17)"
-  boundingObject USE BOX
-}
-Solid {
-  translation -0.32 -1 0.045
-  children [
-    DEF BOX Shape {
-      geometry Box {
-        size 0.1 0.1 0.05
-      }
-    }
-  ]
-  name "solid(4)"
-  boundingObject USE BOX
-}
 CorgiRobot {
   translation 0 0 0.4
 }
 Robot {
-  translation 1 0 0
+  translation 4.56 2.64 0
   children [
     TouchSensor {
       translation 0.305 0.205 0.001

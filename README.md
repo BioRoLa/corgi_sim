@@ -104,6 +104,22 @@ source install/setup.bash
 ros2 launch corgi_sim Corgi_launch.py
 ```
 
+For the new-leg ABAD stair replay world:
+
+```bash
+ros2 launch corgi_sim Corgi_launch_stair.py mode:=realtime
+```
+
+`Corgi_launch_stair.py` loads `worlds/Corgi_ABAD_stair.wbt`, starts `CorgiRobotABAD`, and opens `corgi_control_panel`. The stair world has no support box under the robot and uses a static three-step stair:
+
+```text
+tread width  = 0.30 m
+riser height = 0.15 m
+stair width  = 1.00 m
+first riser  = x 0.40 m
+stair offset = x 0.10 m
+```
+
 ### 3. Run a Controller
 
 In a separate terminal:

@@ -33,7 +33,7 @@ def generate_launch_description():
     
     world_arg = DeclareLaunchArgument(
         'world',
-        default_value='Corgi_ABAD.wbt',
+        default_value='corgi_stair_proto.wbt',
         description='Choose the world file name'
     )
 

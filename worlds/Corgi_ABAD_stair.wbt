@@ -1,0 +1,97 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "../protos/CorgiRobotABAD.proto"
+
+WorldInfo {
+  basicTimeStep 1
+  FPS 30
+  contactProperties [
+    ContactProperties {
+      material1 "foot_tip"
+      material2 "Floor"
+      maxContactJoints 20
+    }
+    ContactProperties {
+      material1 "Floor"
+      maxContactJoints 20
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.2132287584024287 -0.10658853736343506 0.9711921735126451 3.721958818381553
+  position 1.443222832121603 1.4875312993575845 0.8962481719907723
+  followType "Pan and Tilt Shot"
+  followSmoothness 1
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+  castShadows FALSE
+}
+RectangleArena {
+  translation 0 0.02 -0.17
+  contactMaterial "Floor"
+  floorSize 10 10
+}
+# Stair dimensions match the current new-leg planner diagnostic case:
+# tread width = 0.30 m, riser height = 0.15 m, stair width = 1.00 m.
+# The first riser starts at x = 0.40 m relative to the world origin.
+DEF STAIR_STEP_1 Solid {
+  translation 0.55 0 -0.095
+  contactMaterial "Floor"
+  children [
+    DEF STAIR_STEP_1_SHAPE Shape {
+      appearance PBRAppearance {
+        baseColor 0.52 0.50 0.47
+        roughness 0.85
+        metalness 0
+      }
+      geometry Box {
+        size 0.30 1.00 0.15
+      }
+    }
+  ]
+  boundingObject USE STAIR_STEP_1_SHAPE
+}
+DEF STAIR_STEP_2 Solid {
+  translation 0.85 0 -0.02
+  contactMaterial "Floor"
+  children [
+    DEF STAIR_STEP_2_SHAPE Shape {
+      appearance PBRAppearance {
+        baseColor 0.50 0.48 0.45
+        roughness 0.85
+        metalness 0
+      }
+      geometry Box {
+        size 0.30 1.00 0.30
+      }
+    }
+  ]
+  boundingObject USE STAIR_STEP_2_SHAPE
+}
+DEF STAIR_STEP_3 Solid {
+  translation 1.15 0 0.055
+  contactMaterial "Floor"
+  children [
+    DEF STAIR_STEP_3_SHAPE Shape {
+      appearance PBRAppearance {
+        baseColor 0.48 0.46 0.43
+        roughness 0.85
+        metalness 0
+      }
+      geometry Box {
+        size 0.30 1.00 0.45
+      }
+    }
+  ]
+  boundingObject USE STAIR_STEP_3_SHAPE
+}
+CorgiRobotABAD {
+  translation -0.01 0 -0.05
+  controller "<extern>"
+  supervisor TRUE
+}

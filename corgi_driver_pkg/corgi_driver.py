@@ -479,7 +479,7 @@ class CorgiDriver:
         self._support_box_removed_step = -1  # skip contact for 1 step after removal
 
         if self.experiment_mode:
-            self.__node.get_logger().info("[Experiment Mode] Skipping initial pause. Subscribing to /trigger for support box removal.")
+            self.__node.get_logger().info("[Experiment Mode] Skipping initial pause. Subscribing to /trigger for optional support box removal.")
             # Subscribe to /trigger to remove the support box when experiment starts
             self.trigger_sub = self.__node.create_subscription(
                 TriggerStamped,
@@ -508,8 +508,9 @@ class CorgiDriver:
                         "[Experiment Mode] Support box removed! Robot is now free-standing."
                     )
                 else:
+                    self.support_box_removed = True
                     self.__node.get_logger().warn(
-                        "[Experiment Mode] DEF SUPPORT_BOX not found in world."
+                        "[Experiment Mode] DEF SUPPORT_BOX not found in world; nothing to remove."
                     )
             except Exception as e:
                 self.__node.get_logger().error(

@@ -7,7 +7,13 @@ EXTERNPROTO "../protos/CorgiRobotABAD.proto"
 
 WorldInfo {
   basicTimeStep 1
+  FPS 30
   contactProperties [
+    ContactProperties {
+      material1 "foot_tip"
+      material2 "Floor"
+      maxContactJoints 20
+    }
     ContactProperties {
       material1 "Floor"
       maxContactJoints 20
@@ -15,15 +21,88 @@ WorldInfo {
   ]
 }
 Viewpoint {
-  orientation -0.14757799271329652 -0.0709487119663418 0.9865024157786089 3.8407486596226947
-  position 1.3677793098053315 1.239016517481483 0.5788034117040215
+  orientation -0.22633165091167332 -0.08808217874169105 0.9700595412569856 3.7398277420353563
+  position 1.7659731539598031 1.6130256749506018 1.1718088166831895
   followType "Pan and Tilt Shot"
   followSmoothness 1
 }
-Solid {
+DEF SUPPORT_BOX Solid {
   translation 0 0 -0.12
   children [
+    Solid {
+      translation -0.17 0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      name "solid(3)"
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
+    Solid {
+      translation -0.17 -0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      name "solid(2)"
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
+    Solid {
+      translation 0.17 -0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
+    Solid {
+      translation 0.17 0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      name "solid(1)"
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
     DEF BOX Shape {
+      appearance Appearance {
+      }
       geometry Box {
         size 0.4 0.2 0.1
       }
@@ -44,7 +123,5 @@ RectangleArena {
   floorSize 10 10
 }
 CorgiRobotABAD {
-  translation -0.01 0 -0.05
-  controller "<extern>"
-  supervisor TRUE
+  translation -0.01 0 0.03
 }

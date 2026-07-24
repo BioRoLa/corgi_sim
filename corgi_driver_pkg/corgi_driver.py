@@ -18,6 +18,7 @@ from corgi_msgs.msg import MotorCmdStamped
 from corgi_msgs.msg import MotorStateStamped, MotorState
 from corgi_msgs.msg import ImuStamped
 from corgi_msgs.msg import RobotStateStamped
+from corgi_msgs.msg import SimLegContactStamped, SimLegContact
 
 from . import Controller_TB
 from .LegModel import LegModel
@@ -116,11 +117,14 @@ class imu:
 
 class LegManager:
     def __init__(self, robot, prefix, controller_tb, basic_time_step=1, Max_Torque=35,
-                 abad_prefix=None, leg_config=None):
+                 abad_prefix=None, leg_config=None, motor_mode='torque'):
         self.prefix = prefix
         self.motors = {}
         self.sensors = {}
         self.tb = controller_tb
+        # 'torque': 手動 PD + setTorque (預設，與實機一致)
+        # 'position': 直接 setPosition，交給 Webots 內建位置伺服 (僅用於驗證軌跡規劃)
+        self.motor_mode = motor_mode
 
         cfg = leg_config or {}
         jdir = cfg.get('joint_dir', {})
@@ -159,10 +163,12 @@ class LegManager:
             motor = robot.getDevice(full_name)
             if motor:
                 self.motors[name] = motor
-                # 設定為扭矩控制模式
-                motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
-                motor.setVelocity(0.0)           # 初始速度為 0
-                motor.enableTorqueFeedback(self.basic_time_step)
+                if self.motor_mode == 'torque':
+                    # 設定為扭矩控制模式
+                    motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
+                    motor.setVelocity(0.0)           # 初始速度為 0
+                    motor.enableTorqueFeedback(self.basic_time_step)
+                # position 模式：保留 Webots 預設位置控制，僅由 set_target() 呼叫 setPosition()
                 motor.setAvailableTorque(self.Max_Torque)
         
         # --- ABAD 馬達 (力矩控制) ---
@@ -182,9 +188,10 @@ class LegManager:
             self.motor_abad = robot.getDevice(abad_name)
             if self.motor_abad:
                 self.motors["ABAD"] = self.motor_abad
-                self.motor_abad.setPosition(float('inf'))
-                self.motor_abad.setVelocity(0.0)
-                self.motor_abad.enableTorqueFeedback(self.basic_time_step)
+                if self.motor_mode == 'torque':
+                    self.motor_abad.setPosition(float('inf'))
+                    self.motor_abad.setVelocity(0.0)
+                    self.motor_abad.enableTorqueFeedback(self.basic_time_step)
                 self.motor_abad.setAvailableTorque(self.Max_Torque)
             else:
                 print(f"Warning: 找不到 ABAD 馬達 {abad_name}")
@@ -268,20 +275,29 @@ class LegManager:
         # 處理角度連續性（避免 ±π 跳變）
         cmd_R = self._find_closest_phi(cmd_R, pos_r)
         cmd_L = self._find_closest_phi(cmd_L, pos_l)
-        
-        # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
-        trq_r, err_r = self._apply_torque_control(
-            "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
-            kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r
-        )
-        trq_l, err_l = self._apply_torque_control(
-            "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
-            kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l
-        )
-        
-        # 保存實際套用的扭矩命令
-        self.cmd_trq_r = trq_r
-        self.cmd_trq_l = trq_l
+
+        if self.motor_mode == 'position':
+            # 直接交給 Webots 內建位置伺服，PD 增益/前饋扭矩在此模式下不使用
+            self.motors["R_Motor"].setPosition(cmd_R * self.dir_motor_r)
+            self.motors["L_Motor"].setPosition(cmd_L * self.dir_motor_l)
+            err_r = cmd_R - pos_r * self.dir_motor_r
+            err_l = cmd_L - pos_l * self.dir_motor_l
+            trq_r = trq_l = 0.0
+            self.cmd_trq_r = 0.0
+            self.cmd_trq_l = 0.0
+        else:
+            # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
+            trq_r, err_r = self._apply_torque_control(
+                "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
+                kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r
+            )
+            trq_l, err_l = self._apply_torque_control(
+                "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
+                kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l
+            )
+            # 保存實際套用的扭矩命令
+            self.cmd_trq_r = trq_r
+            self.cmd_trq_l = trq_l
         
         # print debug info
         return "".join([f"[{self.prefix}] Target θ: {theta:.3f} rad, β: {beta:.3f} rad | ",
@@ -316,13 +332,18 @@ class LegManager:
         self.prev_vel_h = vel_h
 
         gamma_target = self._find_closest_phi(gamma * self.dir_abad, pos_h)
-        trq_h, _ = self._apply_torque_control(
-            "ABAD", gamma_target, pos_h, vel_h,
-            kp=kp, kd=kd, torque_ff=torque * self.dir_abad
-        )
+
+        if self.motor_mode == 'position':
+            self.motor_abad.setPosition(gamma_target)
+            self.cmd_trq_h = 0.0
+        else:
+            trq_h, _ = self._apply_torque_control(
+                "ABAD", gamma_target, pos_h, vel_h,
+                kp=kp, kd=kd, torque_ff=torque * self.dir_abad
+            )
+            self.cmd_trq_h = trq_h * self.dir_abad
 
         self.current_vel_h = vel_h * self.dir_abad
-        self.cmd_trq_h = trq_h * self.dir_abad
     
     def update_g_joint(self, theta, beta):
         """根據 theta/beta 更新 G_Joint 被動追蹤
@@ -397,14 +418,26 @@ class CorgiDriver:
         self.tf_broadcaster = TransformBroadcaster(self.__node) 
         
         # Fixed PID parameters (not using ROS2 parameter)
-        # TUNED Params
-        self.KP = 90.0
+        # TUNED Params — updated from PID sweep 2026-06-29
+        self.KP = 120.0      # leg (theta/beta) proportional gain
         self.KI = 0.0
-        self.KD = 1.75
+        self.KD = 1.75       # leg derivative gain
+        self.GAMMA_KP = 150.0  # abad gamma proportional gain
+        self.GAMMA_KD = 1.75   # abad gamma derivative gain
         # self.Max_Torque = self.KP if self.KP > 35.0 else 35.0
         self.Max_Torque = 35.0
         self.trq_feedforward = 0  # N·m 前饋扭矩
-        
+
+        # 馬達控制模式：'torque'（預設，實機一致的手動 PD+setTorque）或 'position'
+        # （交給 Webots 內建位置伺服，僅用於驗證軌跡規劃，排除馬達動態誤差）。
+        # 未指定 CORGI_MOTOR_MODE 時預設為 torque。
+        self.motor_mode = os.environ.get('CORGI_MOTOR_MODE', 'torque').strip().lower()
+        if self.motor_mode not in ('torque', 'position'):
+            self.__node.get_logger().warn(
+                f"未知的 CORGI_MOTOR_MODE='{self.motor_mode}'，改用預設值 'torque'"
+            )
+            self.motor_mode = 'torque'
+
         # 3. initialize Legs (direction config loaded from motor_config.py)
         self.legs = {
             leg_id: LegManager(
@@ -415,6 +448,7 @@ class CorgiDriver:
                 Max_Torque=self.Max_Torque,
                 abad_prefix=leg_id,
                 leg_config=LEG_CONFIG[leg_id],
+                motor_mode=self.motor_mode,
             )
             for leg_id in ('A', 'B', 'C', 'D')
         }
@@ -452,14 +486,29 @@ class CorgiDriver:
             'robot/state',
             1
         )
-        
+
+        # Contact state publisher
+        self.contact_pub = self.__node.create_publisher(
+            SimLegContactStamped,
+            'sim/leg_contact',
+            1000
+        )
+        # Contact detection: getContactPoints(includeDescendants=True) every 100 steps,
+        # result assigned via nearest-module (not quadrant) to avoid cross-boundary bleed.
+        self._contact_cache = set()
+        self._contact_update_interval = 100
+        # Module hip positions in robot body frame: A front-left, B front-right, C rear-right, D rear-left
+        self._MODULE_XY = {'A': (0.255, 0.12), 'B': (0.255, -0.12),
+                           'C': (-0.255, -0.12), 'D': (-0.255, 0.12)}
+
         # Initialize loop counter
         self.loop_counter = 0
-        
+
         # --- Experiment Mode ---
         self.experiment_mode = os.environ.get('CORGI_EXPERIMENT_MODE', '0') == '1'
         self.support_box_removed = False
-        
+        self._support_box_removed_step = -1  # skip contact for 1 step after removal
+
         if self.experiment_mode:
             self.__node.get_logger().info("[Experiment Mode] Skipping initial pause. Subscribing to /trigger for support box removal.")
             # Subscribe to /trigger to remove the support box when experiment starts
@@ -475,7 +524,10 @@ class CorgiDriver:
         
         container_id = os.environ.get('HOSTNAME', 'Unknown')
         domain_id = os.environ.get('ROS_DOMAIN_ID', '???')
-        self.__node.get_logger().info(f"Driver Initialized! Connected from Container: {container_id} (Domain: {domain_id})")
+        self.__node.get_logger().info(
+            f"Driver Initialized! Connected from Container: {container_id} (Domain: {domain_id}) "
+            f"| Motor Mode: {self.motor_mode}"
+        )
         
     def _experiment_trigger_cb(self, msg):
         """[Experiment Mode] Remove support box when trigger is enabled."""
@@ -485,6 +537,7 @@ class CorgiDriver:
                 if box_node:
                     box_node.remove()
                     self.support_box_removed = True
+                    self._support_box_removed_step = self.loop_counter
                     self.__node.get_logger().info(
                         "[Experiment Mode] Support box removed! Robot is now free-standing."
                     )
@@ -605,7 +658,7 @@ class CorgiDriver:
                     self.KD, self.KD,
                     0.0, 0.0,
                 )
-                leg.set_abad(self.default_gamma, self.KP, self.KD, 0.0)
+                leg.set_abad(self.default_gamma, self.GAMMA_KP, self.GAMMA_KD, 0.0)
     
     def pub_tf(self):
         # B. 發布 TF (完美的里程計)
@@ -684,18 +737,82 @@ class CorgiDriver:
         fsm_msg.header.stamp = self.ros_time_msg
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
-    
+
+    def pub_contact(self):
+        msg = SimLegContactStamped()
+        msg.header.seq = self.loop_counter
+        msg.header.stamp = self.ros_time_msg
+
+        contact_set = set()
+        n_cp_total  = 0
+        n_cp_ground = 0
+
+        # Skip for 1 step immediately after support box removal (avoid Webots segfault on stale physics)
+        if self.loop_counter <= self._support_box_removed_step + 1:
+            self.contact_pub.publish(msg)
+            return
+
+        # Only refresh contact points every N steps
+        if self.loop_counter % self._contact_update_interval == 0:
+            contact_set = set()
+            try:
+                pos = self.__self_node.getPosition()
+                R   = self.__self_node.getOrientation()
+                cps = self.__self_node.getContactPoints(includeDescendants=True)
+                n_cp_total = len(cps)
+
+                for cp in cps:
+                    pw = cp.getPoint()
+                    if pw[2] > 0.02:
+                        continue
+                    n_cp_ground += 1
+                    # Transform to robot body frame
+                    dx, dy, dz = pw[0]-pos[0], pw[1]-pos[1], pw[2]-pos[2]
+                    bx = R[0]*dx + R[3]*dy + R[6]*dz
+                    by = R[1]*dx + R[4]*dy + R[7]*dz
+                    # Assign to nearest module (avoids cross-quadrant bleed from arc geometry)
+                    best, best_d = 'A', float('inf')
+                    for leg_id, (mx, my) in self._MODULE_XY.items():
+                        d = (bx-mx)**2 + (by-my)**2
+                        if d < best_d:
+                            best_d, best = d, leg_id
+                    contact_set.add(best)
+
+                self._contact_cache = contact_set
+                if self.loop_counter % 1000 == 0:
+                    self.__node.get_logger().info(
+                        f"[Contact] legs={contact_set} n_cp={n_cp_total} ground={n_cp_ground}"
+                    )
+            except Exception as e:
+                if self.loop_counter % 5000 == 0:
+                    self.__node.get_logger().warn(f"[Contact] error: {e}")
+        else:
+            contact_set = self._contact_cache
+
+        module_map = {
+            'A': msg.module_a, 'B': msg.module_b,
+            'C': msg.module_c, 'D': msg.module_d,
+        }
+        for leg_id, module in module_map.items():
+            module.contact = leg_id in contact_set
+            module.rim_ul = module.contact
+            module.rim_ll = module.contact
+            module.rim_lr = module.contact
+            module.rim_ur = module.contact
+
+        self.contact_pub.publish(msg)
+
     # Webots main loop, Webots will call this function
     def step(self):
         # === 1. pub clock ===
         self.pub_clock()
-        
+
         # === 2. process ros2 communication ===
         rclpy.spin_once(self.__node, timeout_sec=0)
-        
+
         # === 3. control logic  ===
         self.execute_motor()
-        
+
         # === 4. pub datas ===
         # TF
         self.pub_tf()
@@ -703,6 +820,8 @@ class CorgiDriver:
         self.pub_motor_state()
         # IMU
         self.pub_imu()
+        # Contact State
+        self.pub_contact()
         # FSM
         self.pub_fsm()
         

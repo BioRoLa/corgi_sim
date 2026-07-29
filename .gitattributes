@@ -1,1 +1,2 @@
 protos/CorgiRobotABAD.proto filter=lfs diff=lfs merge=lfs -text
+protos/CorgiRobotABAD_LegTest.proto filter=lfs diff=lfs merge=lfs -text

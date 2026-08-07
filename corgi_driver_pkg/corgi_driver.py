@@ -465,7 +465,19 @@ class CorgiDriver:
         # Contact detection: getContactPoints(includeDescendants=True) every 100 steps,
         # result assigned via nearest-module (not quadrant) to avoid cross-boundary bleed.
         self._contact_cache = set()
-        self._contact_update_interval = 100
+        # Contact points are refreshed every N simulation steps. At 100 (1 ms
+        # step => every 100 ms) a 267 ms hop stride got only ~2.7 contact
+        # updates, and its 157 ms flight phase about 1.6 samples -- so whether
+        # a flight phase registered at all was close to chance. Measured flight
+        # fraction swung between 0% and 36% on identical controller settings,
+        # which was mistaken for gait instability.
+        #
+        # 10 gives ~27 samples per stride, enough to resolve a 43/57 duty
+        # split. The refresh calls getContactPoints() on the supervisor, but
+        # the per-call loop is only ~12 points; the simulation is dominated by
+        # the 300k-triangle mesh physics, not by this.
+        self._contact_update_interval = int(
+            os.environ.get('CORGI_CONTACT_INTERVAL', '10'))
         # Module hip positions in robot body frame: A front-left, B front-right, C rear-right, D rear-left
         self._MODULE_XY = {'A': (0.255, 0.12), 'B': (0.255, -0.12),
                            'C': (-0.255, -0.12), 'D': (-0.255, 0.12)}

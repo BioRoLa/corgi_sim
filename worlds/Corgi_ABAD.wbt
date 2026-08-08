@@ -23,8 +23,9 @@ WorldInfo {
 Viewpoint {
   orientation -0.22633165091167332 -0.08808217874169105 0.9700595412569856 3.7398277420353563
   position 1.4971326253804775 1.4259486054011605 1.0064975008373545
+  follow "CorgiRobotABAD"
   followType "Pan and Tilt Shot"
-  followSmoothness 1
+  followSmoothness 0.1
 }
 DEF SUPPORT_BOX Solid {
   translation 0 0 -0.12

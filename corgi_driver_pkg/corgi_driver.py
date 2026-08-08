@@ -946,6 +946,23 @@ class CorgiDriver:
         except Exception:
             return
 
+        # Centre of mass in the BODY frame. The fore/aft COM offset is on
+        # record (1.7 mm behind the wheelbase midpoint, from weighing the real
+        # robot) but the LATERAL offset has never been checked, and a lateral
+        # COM bias is a candidate for the constant per-stride yaw. Supervisor
+        # getCenterOfMass returns world coordinates; rotate into the body.
+        try:
+            com = self.__self_node.getCenterOfMass()
+            cx, cy, cz = com[0]-pos[0], com[1]-pos[1], com[2]-pos[2]
+            com_x = R[0]*cx + R[3]*cy + R[6]*cz
+            com_y = R[1]*cx + R[4]*cy + R[7]*cz
+            com_z = R[2]*cx + R[5]*cy + R[8]*cz
+            self.__node.get_logger().info(
+                f"[COM] body frame x={com_x*1000:+.2f} mm  y={com_y*1000:+.2f} mm"
+                f"  z={com_z*1000:+.2f} mm   (y is LATERAL: +y is left)")
+        except Exception as e:
+            self.__node.get_logger().warn(f"[COM] unavailable: {e}")
+
         parts = []
         for leg_id in ('A', 'B', 'C', 'D'):
             pair = self._foot_nodes.get(leg_id)

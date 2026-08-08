@@ -10,6 +10,7 @@ from controller import Supervisor
 from rosgraph_msgs.msg import Clock
 from corgi_msgs.msg import TriggerStamped
 from builtin_interfaces.msg import Time
+from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
 from geometry_msgs.msg import Quaternion
 from geometry_msgs.msg import Vector3
@@ -462,6 +463,25 @@ class CorgiDriver:
             'sim/leg_contact',
             1000
         )
+        # Body odometry publisher (Supervisor ground truth).
+        #
+        # Nothing downstream could measure body speed: the driver published
+        # imu, clock, motor/state, robot/state and sim/leg_contact, and
+        # ImuStamped carries only linear_acceleration -- integrating that over
+        # a 9.5 s speed ramp drifts too far to trust. So flight fraction was
+        # the only available proxy for "is the robot running at the speed the
+        # template was solved for", and the ramp's actual speed profile was
+        # unverified.
+        #
+        # pose is in the odom (world) frame; twist is in base_link, per the
+        # nav_msgs/Odometry convention. Prefer differencing pose.position.x
+        # for a headline speed -- it is the least-processed quantity and is
+        # immune to any body-frame rotation mistake.
+        self.base_odom_pub = self.__node.create_publisher(
+            Odometry,
+            'sim/base_odom',
+            1000
+        )
         # Contact detection: getContactPoints(includeDescendants=True) every 100 steps,
         # result assigned via nearest-module (not quadrant) to avoid cross-boundary bleed.
         self._contact_cache = set()
@@ -478,9 +498,37 @@ class CorgiDriver:
         # the 300k-triangle mesh physics, not by this.
         self._contact_update_interval = int(
             os.environ.get('CORGI_CONTACT_INTERVAL', '10'))
+        # Odometry is sampled on the same interval as contact so the two line
+        # up in time -- reading speed against flight phase per stride is the
+        # whole point of publishing it.
+        self._odom_update_interval = int(
+            os.environ.get('CORGI_ODOM_INTERVAL',
+                           str(self._contact_update_interval)))
         # Module hip positions in robot body frame: A front-left, B front-right, C rear-right, D rear-left
         self._MODULE_XY = {'A': (0.255, 0.12), 'B': (0.255, -0.12),
                            'C': (-0.255, -0.12), 'D': (-0.255, 0.12)}
+
+        # Foot-frame diagnostic (see log_foot_frame). PROTO-internal DEF nodes
+        # are reachable from the PROTO's own controller via getFromProtoDef;
+        # getFromDef is the fallback for a non-opaque scene tree.
+        self._foot_debug = os.environ.get('CORGI_FOOT_DEBUG', '0') == '1'
+        self._foot_nodes = {}
+        if self._foot_debug:
+            for leg_id in ('A', 'B', 'C', 'D'):
+                node = None
+                try:
+                    node = self.__self_node.getFromProtoDef(f'{leg_id}_FOOT')
+                except Exception:
+                    pass
+                if node is None:
+                    try:
+                        node = self.__robot.getFromDef(f'{leg_id}_FOOT')
+                    except Exception:
+                        node = None
+                self._foot_nodes[leg_id] = node
+            found = [k for k, v in self._foot_nodes.items() if v is not None]
+            self.__node.get_logger().info(
+                f"[FootFrame] debug on; resolved feet: {found}")
 
         # Initialize loop counter
         self.loop_counter = 0
@@ -716,6 +764,96 @@ class CorgiDriver:
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
 
+    def pub_base_odom(self):
+        """Publish Supervisor ground-truth body pose and velocity."""
+        if not self.__self_node:
+            return
+        if self.loop_counter % self._odom_update_interval != 0:
+            return
+
+        try:
+            pos = self.__self_node.getPosition()
+            # [vx, vy, vz, wx, wy, wz], world frame
+            vel = self.__self_node.getVelocity()
+            # Row-major, maps body -> world (same matrix pub_contact uses)
+            R = self.__self_node.getOrientation()
+        except Exception as e:
+            if self.loop_counter % 5000 == 0:
+                self.__node.get_logger().warn(f"[Odom] error: {e}")
+            return
+
+        msg = Odometry()
+        msg.header.stamp = self.ros_time_msg
+        msg.header.frame_id = "odom"
+        msg.child_frame_id = "base_link"
+
+        msg.pose.pose.position.x = pos[0]
+        msg.pose.pose.position.y = pos[1]
+        msg.pose.pose.position.z = pos[2]
+
+        # Reuse the axis-angle -> quaternion conversion pub_tf does, so pose
+        # here and the TF frame can never disagree.
+        rot_field = self.__self_node.getField("rotation")
+        if rot_field:
+            rot = rot_field.getSFRotation()
+            half_angle = rot[3] / 2
+            sin_half = math.sin(half_angle)
+            msg.pose.pose.orientation.x = rot[0] * sin_half
+            msg.pose.pose.orientation.y = rot[1] * sin_half
+            msg.pose.pose.orientation.z = rot[2] * sin_half
+            msg.pose.pose.orientation.w = math.cos(half_angle)
+
+        # World -> body is R transposed; indexing matches pub_contact.
+        vx, vy, vz = vel[0], vel[1], vel[2]
+        wx, wy, wz = vel[3], vel[4], vel[5]
+        msg.twist.twist.linear.x = R[0]*vx + R[3]*vy + R[6]*vz
+        msg.twist.twist.linear.y = R[1]*vx + R[4]*vy + R[7]*vz
+        msg.twist.twist.linear.z = R[2]*vx + R[5]*vy + R[8]*vz
+        msg.twist.twist.angular.x = R[0]*wx + R[3]*wy + R[6]*wz
+        msg.twist.twist.angular.y = R[1]*wx + R[4]*wy + R[7]*wz
+        msg.twist.twist.angular.z = R[2]*wx + R[5]*wy + R[8]*wz
+
+        self.base_odom_pub.publish(msg)
+
+    def log_foot_frame(self):
+        """Diagnostic: where each foot sits in the BODY frame, per leg.
+
+        Settles the beta sign convention empirically. Every check inside either
+        codebase is done in the leg/module frame, and the modules are mounted
+        with a 120 deg rotation (about (1,1,1) for A,B and (1,-1,-1) for C,D),
+        so "beta > 0 puts the foot at +x" in the leg model says nothing about
+        which way the body actually travels. This reports foot-minus-hip along
+        body x: positive = the foot is AHEAD of its own hip.
+
+        Off unless CORGI_FOOT_DEBUG=1; costs four Supervisor reads when on.
+        """
+        if not self._foot_debug or not self.__self_node:
+            return
+        if self.loop_counter % 500 != 0:
+            return
+
+        try:
+            pos = self.__self_node.getPosition()
+            R = self.__self_node.getOrientation()
+        except Exception:
+            return
+
+        parts = []
+        for leg_id in ('A', 'B', 'C', 'D'):
+            node = self._foot_nodes.get(leg_id)
+            if node is None:
+                continue
+            fp = node.getPosition()
+            dx, dy, dz = fp[0]-pos[0], fp[1]-pos[1], fp[2]-pos[2]
+            # world -> body, same indexing as pub_contact
+            bx = R[0]*dx + R[3]*dy + R[6]*dz
+            by = R[1]*dx + R[4]*dy + R[7]*dz
+            hip_x, hip_y = self._MODULE_XY[leg_id]
+            parts.append(f"{leg_id}: dx={bx-hip_x:+.4f} dy={by-hip_y:+.4f}")
+
+        if parts:
+            self.__node.get_logger().info("[FootFrame] " + "  ".join(parts))
+
     def pub_contact(self):
         msg = SimLegContactStamped()
         msg.header.seq = self.loop_counter
@@ -800,6 +938,10 @@ class CorgiDriver:
         self.pub_imu()
         # Contact State
         self.pub_contact()
+        # Body odometry (ground truth)
+        self.pub_base_odom()
+        # Foot-frame sign diagnostic (no-op unless CORGI_FOOT_DEBUG=1)
+        self.log_foot_frame()
         # FSM
         self.pub_fsm()
         

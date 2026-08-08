@@ -206,6 +206,82 @@ class LegManager:
         except Exception:
             self.motor_g_joint = None
 
+    # --- ROS <-> module frame: ONE boundary, matched pairs -------------------
+    #
+    # joint_dir flips the sense of theta/beta between the ROS convention and
+    # this module's own frame. Historically that flip was applied to the
+    # POSITION command and to the reported STATE, but not to the feedforward
+    # TORQUE -- so legs with dir_beta = -1 (B and C) were commanded a mirrored
+    # pose while being fed un-mirrored torques. Statically that is invisible
+    # (feedforward ~ 0, the kp term dominates); under load it made B and C
+    # reach only 63-70% of their commanded beta sweep against A and D's 92-95%,
+    # with a ~28 ms phase lag, which yawed the robot ~15-20 deg per speed rung.
+    #
+    # These three functions are the whole conversion. Add signs HERE, never at
+    # a call site.
+
+    def ros_to_module(self, theta, beta):
+        """ROS joint angles -> this module's frame. Self-inverse."""
+        return theta * self.dir_theta, beta * self.dir_beta
+
+    def module_to_ros(self, theta, beta):
+        """This module's frame -> ROS joint angles. Self-inverse."""
+        return theta * self.dir_theta, beta * self.dir_beta
+
+    def convert_torque(self, tau_r, tau_l):
+        """Convert motor torques between ROS and module frame. Self-inverse.
+
+        NOT a free convention -- forced by ros_to_module. force_control works
+        entirely in ROS-convention phi space:
+            fc0 = beta_ros + theta - 17deg      fc1 = beta_ros - theta + 17deg
+        while the driver drives IK(theta, beta * dir_beta), so for
+        dir_beta = -1 the actual motor angles are
+            m0 = -beta_ros + theta - 17 = -fc1      m1 = -fc0
+        i.e. SWAP AND NEGATE. Equivalently via virtual work: generalized
+        forces transform contravariantly, so flipping beta flips tau_beta and
+        leaves tau_theta alone.
+
+        Note the swap is between the (r, l) LABELLED PAIR, which is what makes
+        this safe despite force_control indexing fc0 as "l" while the driver's
+        coupling calls beta+theta-17 the R motor -- both files are internally
+        consistent, and the pair swap is the same operation either way.
+        """
+        self._require_supported_dirs()
+        if self.dir_beta < 0:
+            tau_r, tau_l = -tau_l, -tau_r
+        return tau_r, tau_l
+
+    def convert_gains(self, g_r, g_l):
+        """Convert a PD gain pair between ROS and module frame. Self-inverse.
+
+        The gains need the SAME swap as the torques but WITHOUT the negation,
+        and missing this is what made the torque-only fix over-correct.
+
+        The module-frame error flips sign along with the angle
+        (err_m0 = -err_fc1), so
+            tau_m0 = -tau_fc1 = -kp_fc1 * err_fc1 = kp_fc1 * err_m0
+        -- the gain that belongs on module motor 0 is the OTHER motor's gain,
+        un-negated. A gain is a positive scalar; negating it would invert the
+        servo.
+        """
+        self._require_supported_dirs()
+        if self.dir_beta < 0:
+            g_r, g_l = g_l, g_r
+        return g_r, g_l
+
+    def _require_supported_dirs(self):
+        """dir_theta < 0 is not supported and is not used by any leg.
+
+        A theta flip does NOT reduce to a clean swap, because the coupling
+        carries a constant +-17 deg offset: m0 = beta - theta - 17 is not
+        +-fc0 or +-fc1. It would need its own derivation. All four legs ship
+        dir_theta = +1, so fail loudly rather than apply an unverified map.
+        """
+        if self.dir_theta < 0:
+            raise NotImplementedError(
+                f"[{self.prefix}] dir_theta < 0 is not supported: the 17 deg "
+                "coupling offset breaks the swap mapping; re-derive first.")
+
     def _apply_torque_control(self, motor_name, cmd_pos, current_pos, current_vel,
                               kp=0.0, kd=0.0, torque_ff=0.0):
         """使用 PD + feedforward 控制律計算並套用扭矩。"""
@@ -353,9 +429,9 @@ class LegManager:
         pos_h = self.sensor_abad.getValue() * self.dir_abad if self.sensor_abad else 0.0
         
         msg = MotorState()
-        theta, beta = self.tb.FK(pos_l, pos_r)
-        msg.theta = float(theta * self.dir_theta)
-        msg.beta = float(beta * self.dir_beta)
+        theta, beta = self.module_to_ros(*self.tb.FK(pos_l, pos_r))
+        msg.theta = float(theta)
+        msg.beta = float(beta)
         msg.gamma = float(pos_h)
         
         # 直接使用控制器中計算的速度（已經過濾波）
@@ -364,6 +440,10 @@ class LegManager:
         msg.velocity_h = float(self.current_vel_h)
         
         # 發布扭矩命令值（命令扭矩，而非回饋）
+        #
+        # Reported raw, matching the command path, which does not transform
+        # either (see the note in execute_motor). If the transform is ever
+        # adopted, BOTH ends must change together.
         msg.torque_r = float(self.cmd_trq_r)
         msg.torque_l = float(self.cmd_trq_l)
         msg.torque_h = float(self.cmd_trq_h)
@@ -511,24 +591,38 @@ class CorgiDriver:
         # Foot-frame diagnostic (see log_foot_frame). PROTO-internal DEF nodes
         # are reachable from the PROTO's own controller via getFromProtoDef;
         # getFromDef is the fallback for a non-opaque scene tree.
+        # DO NOT use the *_FOOT DEFs here. They label DIFFERENT BODIES on
+        # different legs: A_FOOT is a real mesh (DEF F_R) partway up the leg,
+        # while B/C/D_FOOT are empty reference links
+        # ("Empty_Link_Joint_G_Ref_<X>_Module") 81 mm lower down. Comparing
+        # them across legs invents a ~40 mm fore-aft offset and a ~30% swing
+        # sensitivity difference on leg A that do not exist -- both were chased
+        # as a hardware fault before the proto was read.
+        #
+        # *_WHEEL_R / *_WHEEL_L exist consistently on all four legs, so take
+        # their midpoint: comparable by construction, and close to the contact.
         self._foot_debug = os.environ.get('CORGI_FOOT_DEBUG', '0') == '1'
         self._foot_nodes = {}
         if self._foot_debug:
             for leg_id in ('A', 'B', 'C', 'D'):
-                node = None
-                try:
-                    node = self.__self_node.getFromProtoDef(f'{leg_id}_FOOT')
-                except Exception:
-                    pass
-                if node is None:
-                    try:
-                        node = self.__robot.getFromDef(f'{leg_id}_FOOT')
-                    except Exception:
-                        node = None
-                self._foot_nodes[leg_id] = node
+                pair = []
+                for side in ('R', 'L'):
+                    node = None
+                    for getter in (
+                        lambda n: self.__self_node.getFromProtoDef(n),
+                        lambda n: self.__robot.getFromDef(n),
+                    ):
+                        try:
+                            node = getter(f'{leg_id}_WHEEL_{side}')
+                        except Exception:
+                            node = None
+                        if node is not None:
+                            break
+                    pair.append(node)
+                self._foot_nodes[leg_id] = pair if all(pair) else None
             found = [k for k, v in self._foot_nodes.items() if v is not None]
             self.__node.get_logger().info(
-                f"[FootFrame] debug on; resolved feet: {found}")
+                f"[FootFrame] debug on; resolved wheel pairs: {found}")
 
         # Initialize loop counter
         self.loop_counter = 0
@@ -650,8 +744,21 @@ class CorgiDriver:
             motor_debug_msg = "\n"
             for leg_id in ('A', 'B', 'C', 'D'):
                 leg = self.legs[leg_id]
-                theta = cmd[f"{leg_id}_Theta"] * leg.dir_theta
-                beta  = cmd[f"{leg_id}_Beta"]  * leg.dir_beta
+                # Position AND torque cross the same boundary together. They
+                # used to disagree: the pose was mirrored for dir_beta = -1
+                # legs while the feedforward torque was not.
+                # NOTE: convert_torque / convert_gains are deliberately NOT
+                # applied here. The argument for them is sound on paper --
+                # dir_beta is honoured on position and state but not on the
+                # gains or feedforward -- but measured, both the torque-only
+                # and torque+gains variants make the gait markedly worse, and
+                # they invert the left/right ratio (1.34-1.47 -> ~0.72, close
+                # to its reciprocal) rather than centring it on 1.0. That is
+                # the signature of a swap applied where none was missing.
+                # See [[Torque Frame Mismatch — dir_beta vs Feedforward]].
+                # The methods and their tests are kept as the record.
+                theta, beta = leg.ros_to_module(cmd[f"{leg_id}_Theta"],
+                                                cmd[f"{leg_id}_Beta"])
                 motor_debug_msg += leg.set_target(
                     theta, beta,
                     cmd[f"{leg_id}_kp_r"], cmd[f"{leg_id}_kp_l"],
@@ -677,9 +784,10 @@ class CorgiDriver:
             # If no command has ever been received, set to default position
             for leg_id in ('A', 'B', 'C', 'D'):
                 leg = self.legs[leg_id]
+                theta, beta = leg.ros_to_module(self.default_theta,
+                                                self.default_beta)
                 leg.set_target(
-                    self.default_theta * leg.dir_theta,
-                    self.default_beta  * leg.dir_beta,
+                    theta, beta,
                     self.KP, self.KP,
                     self.KD, self.KD,
                     0.0, 0.0,
@@ -840,19 +948,34 @@ class CorgiDriver:
 
         parts = []
         for leg_id in ('A', 'B', 'C', 'D'):
-            node = self._foot_nodes.get(leg_id)
-            if node is None:
+            pair = self._foot_nodes.get(leg_id)
+            if not pair:
                 continue
-            fp = node.getPosition()
+            pr, pl = pair[0].getPosition(), pair[1].getPosition()
+            fp = [0.5 * (a + b) for a, b in zip(pr, pl)]
             dx, dy, dz = fp[0]-pos[0], fp[1]-pos[1], fp[2]-pos[2]
             # world -> body, same indexing as pub_contact
             bx = R[0]*dx + R[3]*dy + R[6]*dz
             by = R[1]*dx + R[4]*dy + R[7]*dz
+            bz = R[2]*dx + R[5]*dy + R[8]*dz
             hip_x, hip_y = self._MODULE_XY[leg_id]
-            parts.append(f"{leg_id}: dx={bx-hip_x:+.4f} dy={by-hip_y:+.4f}")
+
+            # Measured joint angles alongside, so the actual foot position can
+            # be checked against what the leg model predicts FROM THOSE ANGLES.
+            # Disagreement => the Webots geometry and LegModel disagree for
+            # this leg. Agreement => the angles themselves are off, i.e. a
+            # tracking or load effect. Leg A shows a -40 mm fore-aft offset and
+            # ~70% of the others' beta sensitivity; this separates the two.
+            leg = self.legs[leg_id]
+            th, be = leg.module_to_ros(
+                *leg.tb.FK(leg.sensors["L_Motor"].getValue(),
+                           leg.sensors["R_Motor"].getValue()))
+            parts.append(
+                f"{leg_id}: th={math.degrees(th):7.3f} be={math.degrees(be):+7.3f} "
+                f"dx={bx-hip_x:+.4f} dy={by-hip_y:+.4f} dz={bz:+.4f}")
 
         if parts:
-            self.__node.get_logger().info("[FootFrame] " + "  ".join(parts))
+            self.__node.get_logger().info("[FootFrame] " + " | ".join(parts))
 
     def pub_contact(self):
         msg = SimLegContactStamped()

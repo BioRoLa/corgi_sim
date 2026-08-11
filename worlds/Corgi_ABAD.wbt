@@ -12,10 +12,18 @@ WorldInfo {
     ContactProperties {
       material1 "foot_tip"
       material2 "Floor"
+      coulombFriction [ 1.0 ]
+      maxContactJoints 20
+    }
+    ContactProperties {
+      material1 "wheel_rim"
+      material2 "Floor"
+      coulombFriction [ 1.0 ]
       maxContactJoints 20
     }
     ContactProperties {
       material1 "Floor"
+      coulombFriction [ 1.0 ]
       maxContactJoints 20
     }
   ]
@@ -121,7 +129,7 @@ TexturedBackgroundLight {
 RectangleArena {
   translation 0 0.02 -0.17
   contactMaterial "Floor"
-  floorSize 10 10
+  floorSize 30 30
 }
 CorgiRobotABAD {
   translation -0.01 0 0.03

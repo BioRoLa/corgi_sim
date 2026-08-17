@@ -145,6 +145,40 @@ class imu:
 MAX_TORQUE_LEG = 29.5     # N.m, HT-04 stall @ 6:1
 MAX_TORQUE_ABAD = 44.25   # N.m, HT-04 stall @ 9:1 (29.5 * 9/6)
 
+# Torque-term decomposition, gated the same way CORGI_FOOT_DEBUG gates the
+# foot-frame diagnostic: off by default, costing one dict write per motor per
+# step when on. Read once at import so the hot path is a bare bool test.
+#
+# WHY THIS EXISTS: the measured leg demand is 5-8x what the G-SLIP model
+# predicts (80-121 N.m against 15.43), and that factor is the single thing
+# holding the trot shut -- every template-side and hardware-side lever together
+# tolerates only ~1.87x. check_torque_phase.py established WHEN it happens
+# (mid-stance, at peak compression, not at touchdown). This establishes WHAT it
+# is made of: stiffness*error, damping, or feedforward.
+TORQUE_DEBUG = os.environ.get('CORGI_TORQUE_DEBUG', '0') == '1'
+TORQUE_DEBUG_PATH = os.environ.get(
+    'CORGI_TORQUE_DEBUG_PATH', '/tmp/corgi_torque_terms.csv')
+
+# Per-contact-point provenance: which SOLID touched the ground, per sample.
+# Exists because leg A reads 0.65-0.71 contact duty against a commanded 0.43
+# while B/C/D sit on design, and the boolean per-module contact cannot say
+# whether that is a real footfall or some other collidable body being assigned
+# to module A. Off by default; costs one getFromId per ground contact when on.
+CONTACT_DEBUG = os.environ.get('CORGI_CONTACT_DEBUG', '0') == '1'
+CONTACT_DEBUG_PATH = os.environ.get(
+    'CORGI_CONTACT_DEBUG_PATH', '/tmp/corgi_contact_nodes.csv')
+
+# Apply the dir_beta frame transform to gains AND feedforward torques (the
+# torque-only variant is known to over-correct -- see the Torque Frame Mismatch
+# note). The transform was reverted 2026-08-08 after measuring WORSE at the
+# 35 N.m clamp; the decomposition work has since shown why that judgement was
+# confounded: on B/C the un-mirrored terms accidentally CANCEL (corr -0.96),
+# suppressing their demand ~3x, so removing the bug un-masks real demand and
+# looks bad exactly when the ceiling clips it. This flag exists to re-judge the
+# fix with the ceiling raised, where its own dynamics are visible. Off by
+# default; runs with it on are NOT comparable to any prior campaign.
+DIRBETA_TRANSFORM = os.environ.get('CORGI_DIRBETA_TRANSFORM', '0') == '1'
+
 
 def resolve_torque_limits():
     """(leg, abad) ceilings in N.m, with env overrides.
@@ -169,6 +203,9 @@ class LegManager:
                  abad_prefix=None, leg_config=None):
         self.prefix = prefix
         self._abad_clamp_warned = False
+        # motor_name -> decomposition tuple, refilled every step by
+        # _apply_torque_control. Empty unless CORGI_TORQUE_DEBUG=1.
+        self._torque_terms = {}
         self.motors = {}
         self.sensors = {}
         self.tb = controller_tb
@@ -348,12 +385,35 @@ class LegManager:
                               kp=0.0, kd=0.0, torque_ff=0.0):
         """使用 PD + feedforward 控制律計算並套用扭矩。"""
         pos_error = cmd_pos - current_pos
-        torque_cmd = kp * pos_error + kd * (-current_vel) + torque_ff
+        t_stiff = kp * pos_error
+        t_damp = kd * (-current_vel)
+        torque_cmd = t_stiff + t_damp + torque_ff
         # motor_name is one of L_Motor / R_Motor / ABAD; fall back to the
         # leg (lower) ceiling rather than the ABAD one if it is ever
         # something else, so an unknown joint fails safe.
         lim = self.max_torque.get(motor_name, self.max_torque_leg)
+        torque_demand = torque_cmd          # BEFORE the clamp -- see below
         torque_cmd = max(-lim, min(lim, torque_cmd))
+
+        # Torque decomposition (no-op unless CORGI_TORQUE_DEBUG=1).
+        #
+        # This is the ONLY place the leg torque exists in full. force_control
+        # publishes gains and a feedforward term separately and never forms the
+        # sum, so instrumenting there would capture roughly a third of the
+        # demand and miss the kp*error term entirely -- which is the one the
+        # mid-stance saturation in check_torque_phase.py points at.
+        #
+        # It is also the only place the UNCLIPPED demand is visible. Everything
+        # downstream reads motor/state, which carries the clamped value, and a
+        # clipped signal cannot be distinguished from a satisfied one -- the
+        # trap that hid the real 80-121 N.m demand for weeks. torque_demand is
+        # captured before the clamp precisely so the decomposition does not
+        # need the ceiling raised to be readable.
+        if TORQUE_DEBUG:
+            self._torque_terms[motor_name] = (
+                t_stiff, t_damp, torque_ff, torque_demand, torque_cmd,
+                pos_error, kp, kd,
+            )
 
         if motor_name in self.motors:
             self.motors[motor_name].setTorque(torque_cmd)
@@ -526,11 +586,17 @@ class LegManager:
         
         # 發布扭矩命令值（命令扭矩，而非回饋）
         #
-        # Reported raw, matching the command path, which does not transform
-        # either (see the note in execute_motor). If the transform is ever
-        # adopted, BOTH ends must change together.
-        msg.torque_r = float(self.cmd_trq_r)
-        msg.torque_l = float(self.cmd_trq_l)
+        # Both ends of the boundary move together: raw when the command path
+        # is raw, converted back (the transform is self-inverse) when
+        # CORGI_DIRBETA_TRANSFORM=1 applies it on the way in. Reporting raw
+        # under the transform would compare A/D's R motor against B/C's L
+        # motor in every downstream diagnostic.
+        if DIRBETA_TRANSFORM:
+            rep_r, rep_l = self.convert_torque(self.cmd_trq_r, self.cmd_trq_l)
+        else:
+            rep_r, rep_l = self.cmd_trq_r, self.cmd_trq_l
+        msg.torque_r = float(rep_r)
+        msg.torque_l = float(rep_l)
         msg.torque_h = float(self.cmd_trq_h)
         return msg
     
@@ -600,6 +666,11 @@ class CorgiDriver:
             f"Torque ceilings: leg {self.max_torque_leg:.2f} N.m (6:1), "
             f"ABAD {self.max_torque_abad:.2f} N.m (9:1) "
             f"[HT-04 stall @ 48 V; override CORGI_MAX_TORQUE_LEG/_ABAD]")
+        if DIRBETA_TRANSFORM:
+            self.__node.get_logger().warn(
+                "DIR_BETA TRANSFORM ON: gains swapped, torques swapped+negated "
+                "on dir_beta=-1 legs; reported torques converted back. Runs "
+                "are NOT comparable to any untransformed campaign.")
 
         # 4. initialize IMU
         self.imu_sensor = imu(self.__robot, self.__node, basic_time_step=self.__timestep)
@@ -682,6 +753,11 @@ class CorgiDriver:
         self._odom_update_interval = int(
             os.environ.get('CORGI_ODOM_INTERVAL',
                            str(self._contact_update_interval)))
+        # Torque decomposition sink, opened lazily on the first sampled step so
+        # a run with CORGI_TORQUE_DEBUG unset never touches the filesystem.
+        self._torque_fh = None
+        # Contact-provenance sink, same lazy pattern (CORGI_CONTACT_DEBUG=1).
+        self._contact_debug_fh = None
         # Module hip positions in robot body frame: A front-left, B front-right, C rear-right, D rear-left
         self._MODULE_XY = {'A': (0.255, 0.12), 'B': (0.255, -0.12),
                            'C': (-0.255, -0.12), 'D': (-0.255, 0.12)}
@@ -845,24 +921,35 @@ class CorgiDriver:
                 # Position AND torque cross the same boundary together. They
                 # used to disagree: the pose was mirrored for dir_beta = -1
                 # legs while the feedforward torque was not.
-                # NOTE: convert_torque / convert_gains are deliberately NOT
-                # applied here. The argument for them is sound on paper --
-                # dir_beta is honoured on position and state but not on the
-                # gains or feedforward -- but measured, both the torque-only
-                # and torque+gains variants make the gait markedly worse, and
-                # they invert the left/right ratio (1.34-1.47 -> ~0.72, close
-                # to its reciprocal) rather than centring it on 1.0. That is
-                # the signature of a swap applied where none was missing.
+                # NOTE: convert_torque / convert_gains are applied ONLY under
+                # CORGI_DIRBETA_TRANSFORM=1 (default off). History: adopted
+                # 2026-08-08, measured worse at the 35 N.m clamp, reverted.
+                # The 2026-08-17 decomposition showed that judgement was
+                # confounded -- on B/C the un-mirrored terms accidentally
+                # cancel (corr -0.96), so the bug SUPPRESSES their demand ~3x
+                # and the fix un-masks it, which looks bad exactly when the
+                # ceiling clips. It also measured the bug's positional
+                # signature directly: left legs fly at beta ~ -9 deg against
+                # right legs ~ -1 deg on identical commands. The flag exists to
+                # re-judge the fix with the ceiling raised.
                 # See [[Torque Frame Mismatch — dir_beta vs Feedforward]].
-                # The methods and their tests are kept as the record.
                 theta, beta = leg.ros_to_module(cmd[f"{leg_id}_Theta"],
                                                 cmd[f"{leg_id}_Beta"])
+                kp_r, kp_l = cmd[f"{leg_id}_kp_r"], cmd[f"{leg_id}_kp_l"]
+                kd_r, kd_l = cmd[f"{leg_id}_kd_r"], cmd[f"{leg_id}_kd_l"]
+                tq_r = cmd[f"{leg_id}_torque_r"] + self.trq_feedforward
+                tq_l = cmd[f"{leg_id}_torque_l"] + self.trq_feedforward
+                if DIRBETA_TRANSFORM:
+                    # Gains swap without negating; torques swap AND negate.
+                    # Both together -- torque-only is known to over-correct.
+                    kp_r, kp_l = leg.convert_gains(kp_r, kp_l)
+                    kd_r, kd_l = leg.convert_gains(kd_r, kd_l)
+                    tq_r, tq_l = leg.convert_torque(tq_r, tq_l)
                 motor_debug_msg += leg.set_target(
                     theta, beta,
-                    cmd[f"{leg_id}_kp_r"], cmd[f"{leg_id}_kp_l"],
-                    cmd[f"{leg_id}_kd_r"], cmd[f"{leg_id}_kd_l"],
-                    cmd[f"{leg_id}_torque_r"] + self.trq_feedforward,
-                    cmd[f"{leg_id}_torque_l"] + self.trq_feedforward,
+                    kp_r, kp_l,
+                    kd_r, kd_l,
+                    tq_r, tq_l,
                 )
                 leg.set_abad(
                     cmd[f"{leg_id}_Gamma"],
@@ -962,6 +1049,58 @@ class CorgiDriver:
         motor_state_msg.module_d = self.legs['D'].get_states()
         self.motor_state_pub.publish(motor_state_msg)
     
+    def log_torque_terms(self):
+        """Append the per-motor torque decomposition. No-op unless CORGI_TORQUE_DEBUG=1.
+
+        One row per leg per motor per sampled step:
+
+            tau_demand = t_stiff + t_damp + t_ff        (BEFORE the clamp)
+            t_stiff    = kp * (phi_des - phi_fb)        tracking against the impedance
+            t_damp     = kd * (-phi_dot)                damping
+            t_ff       = J^T (F_des + M(-acc)) + coupling, from force_control
+
+        Sampled on the SAME interval as contact so the two align stride by
+        stride -- pub_contact's interval was raised to 10 for exactly this
+        class of question, and a decomposition binned by stance progress is
+        useless if its clock does not match the phase signal it is binned by.
+
+        Writes CSV rather than publishing: adding a message type would mean a
+        corgi_msgs rebuild, and nothing needs these terms in real time.
+        """
+        if not TORQUE_DEBUG:
+            return
+        if self.loop_counter % self._contact_update_interval != 0:
+            return
+        if self._torque_fh is None:
+            self._torque_fh = open(TORQUE_DEBUG_PATH, 'w', buffering=1)
+            self._torque_fh.write(
+                't,leg,motor,in_contact,t_stiff,t_damp,t_ff,tau_demand,'
+                'tau_applied,pos_error,kp,kd,theta,beta,gamma\n')
+            print(f"[torque debug] writing {TORQUE_DEBUG_PATH}")
+        t = self.__robot.getTime()
+        # Contact is carried in the same row rather than time-joined afterwards.
+        # pub_contact() runs earlier in step(), so _contact_cache is current,
+        # and both are gated on _contact_update_interval so they cannot drift.
+        for name in ('A', 'B', 'C', 'D'):
+            leg = self.legs[name]
+            c = 1 if name in self._contact_cache else 0
+            # Pose travels with the row. kp = J^T K J is pose-dependent, so
+            # comparing kp across runs that used different gains is only valid
+            # at MATCHED pose -- a k_radial sweep against a compliant support
+            # changes the sag, and the geometry change swamped the gain change
+            # the first time this was attempted.
+            try:
+                st = leg.get_states()
+                th, be, ga = st.theta, st.beta, st.gamma
+            except Exception:
+                th = be = ga = float('nan')
+            for motor, v in leg._torque_terms.items():
+                self._torque_fh.write(
+                    f"{t:.6f},{name},{motor},{c},"
+                    f"{v[0]:.6f},{v[1]:.6f},{v[2]:.6f},{v[3]:.6f},{v[4]:.6f},"
+                    f"{v[5]:.6f},{v[6]:.4f},{v[7]:.4f},"
+                    f"{th:.6f},{be:.6f},{ga:.6f}\n")
+
     def pub_fsm(self):
         """Publish robot state with standby mode"""
         fsm_msg = RobotStateStamped()
@@ -1131,6 +1270,45 @@ class CorgiDriver:
                         if d < best_d:
                             best_d, best = d, leg_id
                     contact_set.add(best)
+                    # Which SOLID produced this contact? (CORGI_CONTACT_DEBUG=1)
+                    #
+                    # The duty question hinges on it: 'contact' here is any
+                    # robot solid touching the ground assigned to the nearest
+                    # module. The proto has 64 boundingObjects and only 12
+                    # tread bodies, so a linkage part scraping the floor is
+                    # counted identically to a real footfall -- and only the
+                    # node identity can tell them apart.
+                    if CONTACT_DEBUG:
+                        nid = -1
+                        for attr in ('get_node_id', 'getNodeId'):
+                            f = getattr(cp, attr, None)
+                            if f is not None:
+                                try:
+                                    nid = f()
+                                except Exception:
+                                    nid = -1
+                                break
+                        else:
+                            nid = getattr(cp, 'node_id', -1)
+                        name = '?'
+                        try:
+                            nd = self.__robot.getFromId(nid)
+                            if nd is not None:
+                                d_ = nd.getDef() or ''
+                                nf = nd.getField('name')
+                                n_ = nf.getSFString() if nf is not None else ''
+                                name = f"{d_}|{n_}"
+                        except Exception:
+                            pass
+                        if self._contact_debug_fh is None:
+                            self._contact_debug_fh = open(
+                                CONTACT_DEBUG_PATH, 'w', buffering=1)
+                            self._contact_debug_fh.write(
+                                't,module,node_id,node,bx,by,wz\n')
+                            print(f"[contact debug] writing {CONTACT_DEBUG_PATH}")
+                        self._contact_debug_fh.write(
+                            f"{self.__robot.getTime():.6f},{best},{nid},"
+                            f"{name},{bx:.4f},{by:.4f},{pw[2]:.4f}\n")
 
                 self._contact_cache = contact_set
                 if self.loop_counter % 1000 == 0:
@@ -1180,6 +1358,8 @@ class CorgiDriver:
         self.pub_base_odom()
         # Foot-frame sign diagnostic (no-op unless CORGI_FOOT_DEBUG=1)
         self.log_foot_frame()
+        # Torque decomposition (no-op unless CORGI_TORQUE_DEBUG=1)
+        self.log_torque_terms()
         # FSM
         self.pub_fsm()
         

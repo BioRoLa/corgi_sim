@@ -26,6 +26,13 @@ from .LegModel import LegModel
 from .motor_config import LEG_CONFIG
 
 
+# ABAD joint range, radians. The real mechanism stops at about +/-70 deg; the
+# proto now enforces it (minPosition/maxPosition on each *_ABAD motor) and this
+# is the matching software guard, so an out-of-range command is reported rather
+# than silently absorbed. Override with CORGI_ABAD_LIMIT_DEG.
+ABAD_LIMIT_RAD = math.radians(float(os.environ.get("CORGI_ABAD_LIMIT_DEG", "70")))
+
+
 def _load_leg_config():
     """從與本模組相同目錄的 motor_config.yaml 讀取關節方向設定。
     修改 YAML 後直接重啟 Webots 即可，不需要 colcon build。"""
@@ -116,10 +123,52 @@ class imu:
             msg.linear_acceleration = Vector3(x=acc[0], y=acc[1], z=acc[2])
         return msg
 
+# --- Torque ceilings ---------------------------------------------------------
+#
+# PROVENANCE (record it here; the previous value had none). Motor is the Haitai
+# HT-04 / HT8115-J6 on BOTH the leg and the ABAD, run at 48 V. Datasheet, after
+# the stock 6:1 planetary: rated 11 N.m, stall 29.5 N.m, stall current 45 A,
+# torque constant 0.7 N.m/A referred to the output (11/16 = 0.69), max speed
+# 330 rpm at 48 V.
+#
+# The gearboxes differ: LEG 6:1 (stock, so the datasheet figures apply as
+# printed) and ABAD 9:1 (torque x1.5, speed /1.5). Assumes equal gearbox
+# efficiency -- check that before leaning on the ABAD figure for a claim.
+#
+# These are STALL torques, i.e. the absolute ceiling at zero speed. Available
+# torque droops with speed: the leg runs ~40-60 rpm during stance, ~15% of its
+# 330 rpm no-load, so its realistic ceiling is nearer 25 N.m. Model that with
+# CORGI_MAX_TORQUE_LEG if a run needs to be conservative.
+#
+# The previous shared value of 35.0 was ABOVE the leg's stall torque -- a torque
+# the hardware cannot produce at any speed -- and BELOW the ABAD's.
+MAX_TORQUE_LEG = 29.5     # N.m, HT-04 stall @ 6:1
+MAX_TORQUE_ABAD = 44.25   # N.m, HT-04 stall @ 9:1 (29.5 * 9/6)
+
+
+def resolve_torque_limits():
+    """(leg, abad) ceilings in N.m, with env overrides.
+
+    CORGI_MAX_TORQUE_LEG / _ABAD set one joint each. CORGI_MAX_TORQUE sets BOTH
+    -- kept because sweep_torque_ceiling.sh drives it to make the clipped demand
+    observable, and that experiment wants one knob, not two.
+
+    Raising any of these does NOT model a stronger motor. It is an instrument
+    for seeing demand that would otherwise be clipped, and results taken with it
+    raised must not be read as "the robot would do this with better hardware".
+    """
+    both = os.environ.get("CORGI_MAX_TORQUE")
+    leg = float(os.environ.get("CORGI_MAX_TORQUE_LEG", both or MAX_TORQUE_LEG))
+    abad = float(os.environ.get("CORGI_MAX_TORQUE_ABAD", both or MAX_TORQUE_ABAD))
+    return leg, abad
+
+
 class LegManager:
-    def __init__(self, robot, prefix, controller_tb, basic_time_step=1, Max_Torque=35,
+    def __init__(self, robot, prefix, controller_tb, basic_time_step=1,
+                 max_torque_leg=None, max_torque_abad=None,
                  abad_prefix=None, leg_config=None):
         self.prefix = prefix
+        self._abad_clamp_warned = False
         self.motors = {}
         self.sensors = {}
         self.tb = controller_tb
@@ -149,7 +198,20 @@ class LegManager:
         self.cmd_trq_r = 0.0
         self.cmd_trq_h = 0.0
         self.basic_time_step = basic_time_step
-        self.Max_Torque = Max_Torque
+        # Per-joint torque ceilings. The leg and ABAD run the SAME motor
+        # (Haitai HT-04 / HT8115-J6, 48 V) but DIFFERENT gearboxes -- leg
+        # 6:1, ABAD 9:1 -- so their output ceilings differ by 1.5x. A
+        # single shared clamp is wrong for both at once: it was 19% too
+        # generous on the leg and 21% too tight on the ABAD.
+        self.max_torque_leg = (MAX_TORQUE_LEG if max_torque_leg is None
+                               else float(max_torque_leg))
+        self.max_torque_abad = (MAX_TORQUE_ABAD if max_torque_abad is None
+                                else float(max_torque_abad))
+        self.max_torque = {
+            "L_Motor": self.max_torque_leg,
+            "R_Motor": self.max_torque_leg,
+            "ABAD":    self.max_torque_abad,
+        }
         
         for name in motor_names:
             full_name = prefix + name
@@ -165,7 +227,7 @@ class LegManager:
                 motor.setPosition(float('inf'))  # 無限位置 = 不使用位置控制
                 motor.setVelocity(0.0)           # 初始速度為 0
                 motor.enableTorqueFeedback(self.basic_time_step)
-                motor.setAvailableTorque(self.Max_Torque)
+                motor.setAvailableTorque(self.max_torque_leg)
         
         # --- ABAD 馬達 (力矩控制) ---
         self.motor_abad = None
@@ -187,7 +249,7 @@ class LegManager:
                 self.motor_abad.setPosition(float('inf'))
                 self.motor_abad.setVelocity(0.0)
                 self.motor_abad.enableTorqueFeedback(self.basic_time_step)
-                self.motor_abad.setAvailableTorque(self.Max_Torque)
+                self.motor_abad.setAvailableTorque(self.max_torque_abad)
             else:
                 print(f"Warning: 找不到 ABAD 馬達 {abad_name}")
         
@@ -287,7 +349,11 @@ class LegManager:
         """使用 PD + feedforward 控制律計算並套用扭矩。"""
         pos_error = cmd_pos - current_pos
         torque_cmd = kp * pos_error + kd * (-current_vel) + torque_ff
-        torque_cmd = max(-self.Max_Torque, min(self.Max_Torque, torque_cmd))
+        # motor_name is one of L_Motor / R_Motor / ABAD; fall back to the
+        # leg (lower) ceiling rather than the ABAD one if it is ever
+        # something else, so an unknown joint fails safe.
+        lim = self.max_torque.get(motor_name, self.max_torque_leg)
+        torque_cmd = max(-lim, min(lim, torque_cmd))
 
         if motor_name in self.motors:
             self.motors[motor_name].setTorque(torque_cmd)
@@ -393,7 +459,26 @@ class LegManager:
         self.prev_pos_h = pos_h
         self.prev_vel_h = vel_h
 
-        gamma_target = self._find_closest_phi(gamma * self.dir_abad, pos_h)
+        # The ABAD is a LIMITED joint (+/-70 deg, now enforced in the proto), so
+        # it must NOT be unwrapped the way the continuously-rotating hip motors
+        # are. _find_closest_phi picks whichever 2*pi-equivalent sits nearest the
+        # current position, which on a limited joint means a wound-up ABAD gets
+        # FOLLOWED round instead of pulled back -- exactly what let the joints
+        # spin through full circles on 2026-08-14 while the logged angles still
+        # looked plausible. Command the angle as given, and clamp.
+        gamma_target = gamma * self.dir_abad
+        if abs(gamma_target) > ABAD_LIMIT_RAD:
+            # Print once per leg rather than at 1 kHz. The point is to make an
+            # impossible command VISIBLE -- silently clamping is how a pose the
+            # hardware cannot reach ends up in a result table.
+            if not self._abad_clamp_warned:
+                self._abad_clamp_warned = True
+                print(f"[{self.prefix}] ABAD command "
+                      f"{math.degrees(gamma_target):+.1f} deg is outside the "
+                      f"+/-{math.degrees(ABAD_LIMIT_RAD):.0f} deg range; "
+                      f"clamping. The hardware cannot reach this pose.",
+                      flush=True)
+            gamma_target = math.copysign(ABAD_LIMIT_RAD, gamma_target)
         trq_h, _ = self._apply_torque_control(
             "ABAD", gamma_target, pos_h, vel_h,
             kp=kp, kd=kd, torque_ff=torque * self.dir_abad
@@ -485,8 +570,7 @@ class CorgiDriver:
         self.KD = 1.75       # leg derivative gain
         self.GAMMA_KP = 150.0  # abad gamma proportional gain
         self.GAMMA_KD = 1.75   # abad gamma derivative gain
-        # self.Max_Torque = self.KP if self.KP > 35.0 else 35.0
-        self.Max_Torque = 35.0
+        self.max_torque_leg, self.max_torque_abad = resolve_torque_limits()
         self.trq_feedforward = 0  # N·m 前饋扭矩
         
         # 3. initialize Legs (direction config loaded from motor_config.py)
@@ -496,12 +580,26 @@ class CorgiDriver:
                 f"{leg_id}_Module_",
                 Controller_TB.Controller_TB(theta_0=math.radians(17)),
                 basic_time_step=self.__timestep,
-                Max_Torque=self.Max_Torque,
+                max_torque_leg=self.max_torque_leg,
+                max_torque_abad=self.max_torque_abad,
                 abad_prefix=leg_id,
                 leg_config=LEG_CONFIG[leg_id],
             )
             for leg_id in ('A', 'B', 'C', 'D')
         }
+        # Announce the ceilings. NOTE: this does NOT reach ramp_ctl.log --
+        # the Webots driver's output is not captured by that harness -- so do
+        # not rely on it to tell you which limits a run used.
+        #
+        # The trustworthy check is the DUMP ITSELF: a clamped run's max |tau|
+        # equals the ceiling exactly (29.500 / 44.250 here). Stamping the env
+        # values into the dump instead would be worse than useless -- that is
+        # precisely the S28 failure, where the variable was set and the driver
+        # ignored it, so the metadata would have recorded a lie.
+        self.__node.get_logger().info(
+            f"Torque ceilings: leg {self.max_torque_leg:.2f} N.m (6:1), "
+            f"ABAD {self.max_torque_abad:.2f} N.m (9:1) "
+            f"[HT-04 stall @ 48 V; override CORGI_MAX_TORQUE_LEG/_ABAD]")
 
         # 4. initialize IMU
         self.imu_sensor = imu(self.__robot, self.__node, basic_time_step=self.__timestep)

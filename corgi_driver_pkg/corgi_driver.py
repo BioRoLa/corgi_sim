@@ -664,8 +664,27 @@ class LegManager:
         msg.gamma = float(pos_h)
         
         # 直接使用控制器中計算的速度（已經過濾波）
-        msg.velocity_l = float(self.current_vel_l)
-        msg.velocity_r = float(self.current_vel_r)
+        #
+        # Velocities cross the same frame boundary as the torques below and
+        # transform by the SAME map (they are the time-derivative of the phi
+        # mapping: m0 = -fc1 implies vel_m0 = -vel_fc1). This line was missed
+        # when the transform boundary was built: force_control ingests these
+        # as its module-frame phi_vel and feeds them into vel_fb/acc_fb, the
+        # B_joint damping coupling, and the friction-compensation sign logic
+        # -- so under the transform B/C ran with honest positions, torques
+        # and gains but wrong-frame velocities, which surfaced as their 2.5x
+        # demand surplus (log S58). Same shape as every dir_beta bug so far.
+        #
+        # NOTE: velocity_h is published RAW while pos_h gets dir_abad -- a
+        # separate pre-existing inconsistency (all campaigns to date), left
+        # untouched here for comparability and recorded in the log.
+        if DIRBETA_TRANSFORM:
+            rep_vr, rep_vl = self.convert_torque(self.current_vel_r,
+                                                 self.current_vel_l)
+        else:
+            rep_vr, rep_vl = self.current_vel_r, self.current_vel_l
+        msg.velocity_l = float(rep_vl)
+        msg.velocity_r = float(rep_vr)
         msg.velocity_h = float(self.current_vel_h)
         
         # 發布扭矩命令值（命令扭矩，而非回饋）

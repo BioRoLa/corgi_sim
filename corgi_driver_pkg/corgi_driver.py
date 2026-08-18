@@ -179,6 +179,28 @@ CONTACT_DEBUG_PATH = os.environ.get(
 # default; runs with it on are NOT comparable to any prior campaign.
 DIRBETA_TRANSFORM = os.environ.get('CORGI_DIRBETA_TRANSFORM', '0') == '1'
 
+# theta linkage stop (S34's "next thing to worry about", built after S53/S56
+# showed the B/C "windup" is really the leg folding THROUGH the five-bar
+# singularity into an inverted configuration: measured theta passes 17 deg ->
+# ~0 -> negative, the Jacobian-mapped joint gains explode with the
+# singularity (kp 1 -> 1456 in 30 ms, run2 t=22.7), and everything clips.
+# The hardware linkage physically cannot do this -- theta is bounded to
+# [17, 160] deg by the mechanism -- so the sim needs the stop the plant has.
+#
+# The stop torque is applied AFTER the motor torque clamp: a hard stop reacts
+# through the structure, not through the motor winding, so the 29.5 N.m
+# ceiling does not apply to it. It is distributed to the two leg motors via
+# the numerical Jacobian transpose of theta(phi_L, phi_R), so it acts along
+# theta only and does no work on beta.
+#
+# Default OFF: runs with it on are NOT comparable to prior campaigns.
+THETA_STOP = os.environ.get('CORGI_THETA_STOP', '0') == '1'
+THETA_STOP_MIN = math.radians(float(os.environ.get('CORGI_THETA_STOP_MIN_DEG', '17.0')))
+THETA_STOP_MAX = math.radians(float(os.environ.get('CORGI_THETA_STOP_MAX_DEG', '160.0')))
+THETA_STOP_K = float(os.environ.get('CORGI_THETA_STOP_K', '500.0'))    # N.m/rad along theta
+THETA_STOP_D = float(os.environ.get('CORGI_THETA_STOP_D', '20.0'))     # N.m.s/rad along theta
+THETA_STOP_CAP = float(os.environ.get('CORGI_THETA_STOP_CAP', '80.0')) # per-motor |N.m| cap
+
 
 def resolve_torque_limits():
     """(leg, abad) ceilings in N.m, with env overrides.
@@ -203,6 +225,9 @@ class LegManager:
                  abad_prefix=None, leg_config=None):
         self.prefix = prefix
         self._abad_clamp_warned = False
+        # theta linkage stop state (CORGI_THETA_STOP)
+        self.prev_theta_meas = None
+        self._theta_stop_warned = False
         # motor_name -> decomposition tuple, refilled every step by
         # _apply_torque_control. Empty unless CORGI_TORQUE_DEBUG=1.
         self._torque_terms = {}
@@ -382,7 +407,7 @@ class LegManager:
                 "coupling offset breaks the swap mapping; re-derive first.")
 
     def _apply_torque_control(self, motor_name, cmd_pos, current_pos, current_vel,
-                              kp=0.0, kd=0.0, torque_ff=0.0):
+                              kp=0.0, kd=0.0, torque_ff=0.0, torque_stop=0.0):
         """使用 PD + feedforward 控制律計算並套用扭矩。"""
         pos_error = cmd_pos - current_pos
         t_stiff = kp * pos_error
@@ -394,6 +419,11 @@ class LegManager:
         lim = self.max_torque.get(motor_name, self.max_torque_leg)
         torque_demand = torque_cmd          # BEFORE the clamp -- see below
         torque_cmd = max(-lim, min(lim, torque_cmd))
+        # theta linkage stop: applied AFTER the motor clamp. A hard stop
+        # reacts through the structure, not the motor winding, so the motor
+        # ceiling does not bound it. Zero unless CORGI_THETA_STOP=1 and the
+        # measured theta is outside its linkage range (see set_target).
+        torque_cmd += torque_stop
 
         # Torque decomposition (no-op unless CORGI_TORQUE_DEBUG=1).
         #
@@ -472,15 +502,69 @@ class LegManager:
         # 處理角度連續性（避免 ±π 跳變）
         cmd_R = self._find_closest_phi(cmd_R, pos_r)
         cmd_L = self._find_closest_phi(cmd_L, pos_l)
-        
+
+        # --- theta linkage stop (CORGI_THETA_STOP=1; see module header) ----
+        #
+        # The hardware five-bar bounds theta to [17, 160] deg; the sim does
+        # not, and S53/S56 caught legs folding through the theta ~ 0
+        # singularity into inverted configurations while the Jacobian-mapped
+        # gains exploded. Model the stop: a stiff spring-damper along theta,
+        # engaged only outside the range, mapped to the two motors by the
+        # numerical Jacobian transpose of theta(phi_L, phi_R) so it acts on
+        # theta and does no work on beta. Computed in the raw sensor frame
+        # (dir_motor is 1.0 for every leg motor in motor_config.yaml -- the
+        # same assumption _find_closest_phi already makes above).
+        tau_stop_r = tau_stop_l = 0.0
+        if THETA_STOP:
+            try:
+                th_meas, _ = self.tb.FK(pos_l, pos_r)
+            except Exception:
+                th_meas = float("nan")
+            if math.isfinite(th_meas):
+                if self.prev_theta_meas is None:
+                    self.prev_theta_meas = th_meas
+                th_dot = (th_meas - self.prev_theta_meas) / dt
+                self.prev_theta_meas = th_meas
+                G = 0.0
+                if th_meas < THETA_STOP_MIN:
+                    # push theta back up; damping resists approach, and the
+                    # max() keeps the stop from PULLING the leg outward
+                    G = max(0.0, THETA_STOP_K * (THETA_STOP_MIN - th_meas)
+                            - THETA_STOP_D * th_dot)
+                elif th_meas > THETA_STOP_MAX:
+                    G = min(0.0, -THETA_STOP_K * (th_meas - THETA_STOP_MAX)
+                            - THETA_STOP_D * th_dot)
+                if G != 0.0:
+                    d_fd = 1e-4
+                    try:
+                        th_l, _ = self.tb.FK(pos_l + d_fd, pos_r)
+                        th_r, _ = self.tb.FK(pos_l, pos_r + d_fd)
+                        jl = (th_l - th_meas) / d_fd
+                        jr = (th_r - th_meas) / d_fd
+                    except Exception:
+                        jl = jr = float("nan")
+                    if math.isfinite(jl) and math.isfinite(jr):
+                        cap = THETA_STOP_CAP
+                        tau_stop_l = max(-cap, min(cap, G * jl))
+                        tau_stop_r = max(-cap, min(cap, G * jr))
+                        if not self._theta_stop_warned:
+                            self._theta_stop_warned = True
+                            print(f"[{self.prefix}] THETA STOP ENGAGED: "
+                                  f"theta {math.degrees(th_meas):.1f} deg, "
+                                  f"G {G:.1f}, tau L/R "
+                                  f"{tau_stop_l:.1f}/{tau_stop_r:.1f} N.m",
+                                  flush=True)
+
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
         trq_r, err_r = self._apply_torque_control(
             "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
-            kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r
+            kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r,
+            torque_stop=tau_stop_r
         )
         trq_l, err_l = self._apply_torque_control(
             "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
-            kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l
+            kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l,
+            torque_stop=tau_stop_l
         )
         
         # 保存實際套用的扭矩命令
@@ -671,6 +755,13 @@ class CorgiDriver:
                 "DIR_BETA TRANSFORM ON: gains swapped, torques swapped+negated "
                 "on dir_beta=-1 legs; reported torques converted back. Runs "
                 "are NOT comparable to any untransformed campaign.")
+        if THETA_STOP:
+            self.__node.get_logger().warn(
+                "THETA LINKAGE STOP ON: theta bounded to [%.1f, %.1f] deg, "
+                "K=%.0f D=%.0f cap=%.0f N.m/motor, applied outside the motor "
+                "clamp. Runs are NOT comparable to unstopped campaigns." % (
+                    math.degrees(THETA_STOP_MIN), math.degrees(THETA_STOP_MAX),
+                    THETA_STOP_K, THETA_STOP_D, THETA_STOP_CAP))
 
         # 4. initialize IMU
         self.imu_sensor = imu(self.__robot, self.__node, basic_time_step=self.__timestep)

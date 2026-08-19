@@ -675,9 +675,13 @@ class LegManager:
         # and gains but wrong-frame velocities, which surfaced as their 2.5x
         # demand surplus (log S58). Same shape as every dir_beta bug so far.
         #
-        # NOTE: velocity_h is published RAW while pos_h gets dir_abad -- a
-        # separate pre-existing inconsistency (all campaigns to date), left
-        # untouched here for comparability and recorded in the log.
+        # NOTE (corrected 2026-08-20, log S89 lean thread): velocity_h is
+        # NOT raw -- set_abad already publishes it through dir_abad
+        # (current_vel_h = vel_h * dir_abad, since a85a0bb 2026-04-15), the
+        # same frame as pos_h below. The previous claim here that it was
+        # "published RAW" was written in 8769650 without checking set_abad;
+        # the S60 caveat built on it is retired. No frame inconsistency has
+        # existed on the ABAD velocity path in any campaign.
         if DIRBETA_TRANSFORM:
             rep_vr, rep_vl = self.convert_torque(self.current_vel_r,
                                                  self.current_vel_l)

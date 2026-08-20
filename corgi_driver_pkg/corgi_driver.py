@@ -867,6 +867,15 @@ class CorgiDriver:
         self._odom_update_interval = int(
             os.environ.get('CORGI_ODOM_INTERVAL',
                            str(self._contact_update_interval)))
+        # Torque CSV rate, decoupled from contact. Historically the torque
+        # log sampled on _contact_update_interval, so the event scheduler's
+        # CORGI_CONTACT_INTERVAL=1 would silently make the torque CSV 1 kHz
+        # (10x) and break every ~100 Hz-calibrated analyser. Unset, this
+        # follows the contact interval -- bit-identical to before it
+        # existed; the scheduler campaign sets it to 10.
+        self._torque_update_interval = int(
+            os.environ.get('CORGI_TORQUE_INTERVAL',
+                           str(self._contact_update_interval)))
         # Torque decomposition sink, opened lazily on the first sampled step so
         # a run with CORGI_TORQUE_DEBUG unset never touches the filesystem.
         self._torque_fh = None
@@ -1183,7 +1192,7 @@ class CorgiDriver:
         """
         if not TORQUE_DEBUG:
             return
-        if self.loop_counter % self._contact_update_interval != 0:
+        if self.loop_counter % self._torque_update_interval != 0:
             return
         if self._torque_fh is None:
             self._torque_fh = open(TORQUE_DEBUG_PATH, 'w', buffering=1)

@@ -845,6 +845,46 @@ class CorgiDriver:
             'sim/base_odom',
             1000
         )
+        # CENTRE-OF-MASS ground truth, for alpha. Added 2026-08-22 (log S180).
+        #
+        # WHY IT IS SEPARATE FROM base_odom. alpha -- the touchdown velocity
+        # angle, Lu & Lin's third G-SLIP state -- was measured for the first
+        # time in S167 at 43.8 deg against the model's 5-25. That number is
+        # BODY-ORIGIN velocity differentiated from position, and S115 measured
+        # 17.9-33.8 deg of peak-to-peak pitch, which contaminates it: the model's
+        # alpha belongs to a point mass, and the body origin is not the CoM of a
+        # massless-leg abstraction. The MEDIAN is robust (pitch is ~zero-mean
+        # over a stride); the SPREAD is not, and the spread -- p16-p84 of 51 deg
+        # -- is the half that would decide whether a basin computed around a
+        # fixed point means anything against our distribution.
+        #
+        # getCenterOfMass() returns the world-frame CoM of this node AND its
+        # descendants, i.e. it moves with the legs, which is exactly what the
+        # body origin cannot represent.
+        #
+        # TWIST IS LEFT ZERO ON PURPOSE. Webots has no getCenterOfMassVelocity,
+        # and touchdown_velocity_angle.py already differentiates position with a
+        # central difference rather than reading the twist columns -- the twist
+        # offsets in a `topic echo --csv` of Odometry depend on the 36-element
+        # covariance blocks, and getting that index wrong yields a plausible
+        # wrong number rather than an error. Same treatment here.
+        #
+        # OFF BY DEFAULT so every existing campaign stays bit-identical: this
+        # adds one Supervisor read per odom tick, and the config of record has
+        # been bitten five times by things that defaulted differently.
+        self._publish_com = os.environ.get('CORGI_PUBLISH_COM', '0') == '1'
+        self.com_odom_pub = self.__node.create_publisher(
+            Odometry,
+            'sim/com_odom',
+            1000
+        )
+        # PROOF OF INTENT, from the run's own log. A campaign that meant to
+        # measure alpha on the CoM and silently ran without it would produce a
+        # body-origin answer that looks exactly like the right one -- which is
+        # how S28 lost nine runs to a stale driver. The assert is greppable.
+        self.__node.get_logger().warn(
+            f"COM PUBLISH: {'ON' if self._publish_com else 'off'} "
+            f"(sim/com_odom, CORGI_PUBLISH_COM)")
         # Contact detection: getContactPoints(includeDescendants=True) every 100 steps,
         # result assigned via nearest-module (not quadrant) to avoid cross-boundary bleed.
         self._contact_cache = set()
@@ -1282,6 +1322,29 @@ class CorgiDriver:
         msg.twist.twist.angular.z = R[2]*wx + R[5]*wy + R[8]*wz
 
         self.base_odom_pub.publish(msg)
+
+        # CoM ground truth on the SAME tick and the SAME stamp as base_odom, so
+        # the two streams are sample-aligned and alpha can be computed from
+        # either without interpolating between clocks. S180.
+        if self._publish_com:
+            try:
+                com = self.__self_node.getCenterOfMass()
+            except Exception as e:
+                if self.loop_counter % 5000 == 0:
+                    self.__node.get_logger().warn(f"[CoM] error: {e}")
+                return
+            cmsg = Odometry()
+            cmsg.header.stamp = msg.header.stamp
+            cmsg.header.frame_id = "odom"
+            cmsg.child_frame_id = "com"
+            cmsg.pose.pose.position.x = com[0]
+            cmsg.pose.pose.position.y = com[1]
+            cmsg.pose.pose.position.z = com[2]
+            # Orientation copied from the body so a consumer that reads the
+            # quaternion out of this stream gets the body attitude rather than
+            # an identity that silently means "no rotation".
+            cmsg.pose.pose.orientation = msg.pose.pose.orientation
+            self.com_odom_pub.publish(cmsg)
 
     def log_foot_frame(self):
         """Diagnostic: where each foot sits in the BODY frame, per leg.

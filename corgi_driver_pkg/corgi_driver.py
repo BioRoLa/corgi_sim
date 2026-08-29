@@ -168,6 +168,19 @@ CONTACT_DEBUG = os.environ.get('CORGI_CONTACT_DEBUG', '0') == '1'
 CONTACT_DEBUG_PATH = os.environ.get(
     'CORGI_CONTACT_DEBUG_PATH', '/tmp/corgi_contact_nodes.csv')
 
+# Full-configuration probe (#33 / log S280): log the LOCAL rotation of every
+# Solid in the robot's subtree at 20 Hz -- for an endPoint Solid the local
+# rotation IS its joint state, which covers the 16 passive foot-arc hinges
+# and the five-bar passenger links that have no sensors at all. The sick
+# mode's collapse is invisible to every existing capture; this watches the
+# unwatched channels. Long-format CSV: t,path,rx,ry,rz,angle. Off by
+# default; ~100 supervisor field reads x 20 Hz over the extern-controller
+# TCP link when on (expect a slower RTF -- GAIT_SIM keeps windows honest).
+JOINT_PROBE = os.environ.get('CORGI_JOINT_PROBE', '0') == '1'
+JOINT_PROBE_PATH = os.environ.get(
+    'CORGI_JOINT_PROBE_PATH', '/tmp/corgi_joint_probe.csv')
+JOINT_PROBE_INTERVAL = 50   # steps at 1 kHz -> 20 Hz
+
 # Apply the dir_beta frame transform to gains AND feedforward torques (the
 # torque-only variant is known to over-correct -- see the Torque Frame Mismatch
 # note). The transform was reverted 2026-08-08 after measuring WORSE at the
@@ -921,6 +934,10 @@ class CorgiDriver:
         self._torque_fh = None
         # Contact-provenance sink, same lazy pattern (CORGI_CONTACT_DEBUG=1).
         self._contact_debug_fh = None
+        # Full-configuration probe sink + node cache (CORGI_JOINT_PROBE=1),
+        # same lazy pattern -- see log_joint_probe.
+        self._joint_probe_fh = None
+        self._joint_probe_nodes = None
         # Module hip positions in robot body frame: A front-left, B front-right, C rear-right, D rear-left
         self._MODULE_XY = {'A': (0.255, 0.12), 'B': (0.255, -0.12),
                            'C': (-0.255, -0.12), 'D': (-0.255, 0.12)}
@@ -1272,6 +1289,109 @@ class CorgiDriver:
         fsm_msg.robot_mode = 3  # standby mode
         self.fsm_pub.publish(fsm_msg)
 
+    def _joint_probe_walk(self, node, path, out, depth=0):
+        """Collect (path, rotation_field) for every descendant with a local
+        rotation. Traverses 'children' (MFNode) and 'endPoint' (SFNode);
+        every access guarded -- the supervisor API returns None freely."""
+        if node is None or depth > 30:
+            return
+
+        def get_f(n, fname):
+            # PROTO instances hide their internals from getField; the
+            # proto-internal accessor reaches them (driver comment near
+            # _MODULE_XY says the same for getFromProtoDef).
+            try:
+                f = n.getField(fname)
+                if f is not None:
+                    return f
+            except Exception:
+                pass
+            try:
+                gpf = getattr(n, 'getProtoField', None)
+                if gpf is not None:
+                    return gpf(fname)
+            except Exception:
+                pass
+            return None
+
+        name_f = get_f(node, 'name')
+        try:
+            label = name_f.getSFString() if name_f else node.getTypeName()
+        except Exception:
+            label = '?'
+        here = f"{path}/{label}"
+        rot_f = get_f(node, 'rotation')
+        if rot_f is not None:
+            out.append((here, rot_f))
+        for fname in ('children', 'endPoint'):
+            f = get_f(node, fname)
+            if f is None:
+                continue
+            try:
+                if fname == 'endPoint':
+                    self._joint_probe_walk(f.getSFNode(), here, out, depth + 1)
+                else:
+                    for i in range(f.getCount()):
+                        self._joint_probe_walk(f.getMFNode(i), here, out,
+                                               depth + 1)
+            except Exception:
+                continue
+
+    def log_joint_probe(self):
+        """(#33 / S280) Long-format dump of every solid's LOCAL rotation --
+        the joint state of every hinge, sensed or not. No-op unless
+        CORGI_JOINT_PROBE=1."""
+        if not JOINT_PROBE:
+            return
+        if self.loop_counter % JOINT_PROBE_INTERVAL != 0:
+            return
+        if self._joint_probe_nodes is None:
+            # The robot node is a PROTO instance: its internals are opaque
+            # to getField, so seed the walk from the proto's DEF-named
+            # solids via getFromProtoDef (the resolver pattern the foot
+            # diagnostic already uses). Below a resolved handle, plain
+            # getField traversal works.
+            out = []
+            seeds = [('robot', self.__self_node)]
+            for d in ('A_WHEEL_R', 'A_WHEEL_L', 'B_WHEEL_R', 'B_WHEEL_L',
+                      'C_WHEEL_R', 'C_WHEEL_L', 'D_WHEEL_R', 'D_WHEEL_L',
+                      'A_FOOT', 'B_FOOT', 'C_FOOT', 'D_FOOT'):
+                n = None
+                # getFromProtoDef is a method of the PROTO NODE (the robot's
+                # self node), not of the Supervisor controller object.
+                try:
+                    gfpd = getattr(self.__self_node, 'getFromProtoDef', None)
+                    if gfpd is not None:
+                        n = gfpd(d)
+                except Exception:
+                    n = None
+                if n is None:
+                    try:
+                        n = self.__robot.getFromDef(d)
+                    except Exception:
+                        n = None
+                if n is not None:
+                    seeds.append((d, n))
+                else:
+                    self.__node.get_logger().warn(
+                        f"JOINT PROBE: seed '{d}' did not resolve")
+            for label, n in seeds:
+                self._joint_probe_walk(n, label, out)
+            self._joint_probe_nodes = out
+            self._joint_probe_fh = open(JOINT_PROBE_PATH, 'w')
+            self._joint_probe_fh.write('t,path,rx,ry,rz,angle\n')
+            self.__node.get_logger().warn(
+                f"JOINT PROBE ON: {len(out)} rotation channels -> "
+                f"{JOINT_PROBE_PATH} at 1/{JOINT_PROBE_INTERVAL} steps")
+        t = self.__robot.getTime()
+        w = self._joint_probe_fh.write
+        for path, rot_f in self._joint_probe_nodes:
+            try:
+                r = rot_f.getSFRotation()
+                w(f"{t:.3f},{path},{r[0]:.4f},{r[1]:.4f},{r[2]:.4f},{r[3]:.5f}\n")
+            except Exception:
+                continue
+
     def pub_base_odom(self):
         """Publish Supervisor ground-truth body pose and velocity."""
         if not self.__self_node:
@@ -1544,6 +1664,8 @@ class CorgiDriver:
         self.pub_base_odom()
         # Foot-frame sign diagnostic (no-op unless CORGI_FOOT_DEBUG=1)
         self.log_foot_frame()
+        # Full-configuration probe (no-op unless CORGI_JOINT_PROBE=1, S280)
+        self.log_joint_probe()
         # Torque decomposition (no-op unless CORGI_TORQUE_DEBUG=1)
         self.log_torque_terms()
         # FSM

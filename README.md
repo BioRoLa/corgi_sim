@@ -104,27 +104,24 @@ source install/setup.bash
 ros2 launch corgi_sim Corgi_launch.py
 ```
 
-> **Stair simulation note:** To run a stair simulation, use `Corgi_launch_stair.py` with `mode:=realtime`:
-
-```bash
-ros2 launch corgi_sim Corgi_launch_stair.py mode:=realtime
-```
-
-All stair variants are 30 cm wide; only the riser height differs:
-
-```text
-Corgi_ABAD_stair_h10_d30.wbt  riser height = 10 cm
-Corgi_ABAD_stair_h12_d30.wbt  riser height = 12 cm
-Corgi_ABAD_stair_h15_d30.wbt  riser height = 15 cm
-```
-
-Use the `world` argument to select a stair size:
+> **Stair simulation note:** To run a stair simulation, use `Corgi_launch_stair.py` and select the world with the `world` argument. The following command is an example:
 
 ```bash
 ros2 launch corgi_sim Corgi_launch_stair.py world:=Corgi_ABAD_stair_h10_d30.wbt
-ros2 launch corgi_sim Corgi_launch_stair.py world:=Corgi_ABAD_stair_h12_d30.wbt
-ros2 launch corgi_sim Corgi_launch_stair.py world:=Corgi_ABAD_stair_h15_d30.wbt
 ```
+
+Available stair world dimensions:
+
+| World file | Tread width | Riser height |
+|---|---:|---:|
+| `Corgi_ABAD_stair_h9_d30.wbt` | 30 cm | 9 cm |
+| `Corgi_ABAD_stair_h10_d30.wbt` | 30 cm | 10 cm |
+| `Corgi_ABAD_stair_h12_d30.wbt` | 30 cm | 12 cm |
+| `Corgi_ABAD_stair_h15_d30.wbt` | 30 cm | 15 cm |
+| `Corgi_ABAD_stair_h10_d35.wbt` | 35 cm | 10 cm |
+| `Corgi_ABAD_stair_h12_d35.wbt` | 35 cm | 12 cm |
+| `Corgi_ABAD_stair_h15_d35.wbt` | 35 cm | 15 cm |
+| `Corgi_ABAD_stair_h11_d37.wbt` | 37 cm | 11 cm |
 
 ### 3. Run a Controller
 

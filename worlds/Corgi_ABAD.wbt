@@ -12,6 +12,13 @@ WorldInfo {
     ContactProperties {
       material1 "foot_tip"
       material2 "Floor"
+      coulombFriction [ 1.5 ]
+      maxContactJoints 20
+    }
+    ContactProperties {
+      material1 "wheel_rim"
+      material2 "Floor"
+      coulombFriction [ 1.5 ]
       maxContactJoints 20
     }
     ContactProperties {

@@ -1,0 +1,41 @@
+#VRML_SIM R2025a utf8
+# Shared contact properties for the corgi worlds.
+#
+# Every world that needs foot/wheel-vs-ground contact tuning instantiates this
+# PROTO instead of writing an inline ContactProperties node, so the numbers live
+# in exactly one place.
+#
+# Contact materials used by CorgiRobotABAD.proto:
+#   "foot_tip"  - the G-link tip at the bottom of each leg (A/B/C/D)
+#   "wheel_rim" - the two rim links driven directly by the R/L motors
+# The ground (RectangleArena and the stair step Solids) uses "Floor".
+#
+# Field defaults below are the values used by the stair worlds:
+#   coulombFriction 1     Webots node default, kept as-is (not yet calibrated
+#                         against physical measurements).
+#   bounce 0              Feet must not rebound on touchdown. The Webots node
+#                         default of 0.5 is a generic value that no official
+#                         Webots ground-robot world uses; they use 0.
+#   bounceVelocity 0.003  Same threshold the official NAO worlds use, so even
+#                         low-speed micro-bounces are absorbed.
+#   maxContactJoints 20   Doubled from the node default of 10, matching what the
+#                         worlds previously set inline.
+
+PROTO CorgiContactProperties [
+  field SFString material1        "foot_tip"
+  field SFString material2        "Floor"
+  field MFFloat  coulombFriction  1
+  field SFFloat  bounce           0
+  field SFFloat  bounceVelocity   0.003
+  field SFInt32  maxContactJoints 20
+]
+{
+  ContactProperties {
+    material1        IS material1
+    material2        IS material2
+    coulombFriction  IS coulombFriction
+    bounce           IS bounce
+    bounceVelocity   IS bounceVelocity
+    maxContactJoints IS maxContactJoints
+  }
+}

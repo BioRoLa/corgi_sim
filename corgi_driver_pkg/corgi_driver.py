@@ -782,10 +782,18 @@ class CorgiDriver:
         # values into the dump instead would be worse than useless -- that is
         # precisely the S28 failure, where the variable was set and the driver
         # ignored it, so the metadata would have recorded a lie.
+        # Label each ceiling by whether it is the module default or an env
+        # override, so an override (e.g. ABAD 29.5 = the installed 6:1 stall)
+        # is not printed under the 9:1 design-intent label.
+        leg_label = ("6:1 default" if self.max_torque_leg == MAX_TORQUE_LEG
+                     else "override")
+        abad_label = ("9:1 design default"
+                      if self.max_torque_abad == MAX_TORQUE_ABAD
+                      else "override")
         self.__node.get_logger().info(
-            f"Torque ceilings: leg {self.max_torque_leg:.2f} N.m (6:1), "
-            f"ABAD {self.max_torque_abad:.2f} N.m (9:1) "
-            f"[HT-04 stall @ 48 V; override CORGI_MAX_TORQUE_LEG/_ABAD]")
+            f"Torque ceilings: leg {self.max_torque_leg:.2f} N.m ({leg_label}), "
+            f"ABAD {self.max_torque_abad:.2f} N.m ({abad_label}) "
+            f"[defaults = HT-04 stall @ 48 V; env CORGI_MAX_TORQUE / _LEG / _ABAD]")
         if DIRBETA_TRANSFORM:
             self.__node.get_logger().warn(
                 "DIR_BETA TRANSFORM ON: gains swapped, torques swapped+negated "

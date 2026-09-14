@@ -131,9 +131,12 @@ class imu:
 # torque constant 0.7 N.m/A referred to the output (11/16 = 0.69), max speed
 # 330 rpm at 48 V.
 #
-# The gearboxes differ: LEG 6:1 (stock, so the datasheet figures apply as
-# printed) and ABAD 9:1 (torque x1.5, speed /1.5). Assumes equal gearbox
-# efficiency -- check that before leaning on the ABAD figure for a claim.
+# Gearboxes: the LEG runs the stock 6:1, so the datasheet figures apply as
+# printed. The robot's ABAD ALSO runs the stock 6:1 (29.5 N.m stall): the
+# 9:1 ABAD gearbox (torque x1.5, speed /1.5) was planned and never installed
+# (log S326). MAX_TORQUE_ABAD below keeps that unfitted 9:1 design value as
+# the default; set CORGI_MAX_TORQUE_ABAD=29.5 to simulate the installed
+# gearbox. The 9:1 value also assumes equal gearbox efficiency.
 #
 # These are STALL torques, i.e. the absolute ceiling at zero speed. Available
 # torque droops with speed: the leg runs ~40-60 rpm during stance, ~15% of its
@@ -141,9 +144,10 @@ class imu:
 # CORGI_MAX_TORQUE_LEG if a run needs to be conservative.
 #
 # The previous shared value of 35.0 was ABOVE the leg's stall torque -- a torque
-# the hardware cannot produce at any speed -- and BELOW the ABAD's.
+# the hardware cannot produce at any speed -- and BELOW the ABAD's 9:1 design
+# value (it is above the installed 6:1 ABAD's stall too).
 MAX_TORQUE_LEG = 29.5     # N.m, HT-04 stall @ 6:1
-MAX_TORQUE_ABAD = 44.25   # N.m, HT-04 stall @ 9:1 (29.5 * 9/6)
+MAX_TORQUE_ABAD = 44.25   # N.m, unfitted 9:1 design value (29.5 * 9/6)
 
 # Torque-term decomposition, gated the same way CORGI_FOOT_DEBUG gates the
 # foot-frame diagnostic: off by default, costing one dict write per motor per
@@ -274,10 +278,12 @@ class LegManager:
         self.cmd_trq_h = 0.0
         self.basic_time_step = basic_time_step
         # Per-joint torque ceilings. The leg and ABAD run the SAME motor
-        # (Haitai HT-04 / HT8115-J6, 48 V) but DIFFERENT gearboxes -- leg
-        # 6:1, ABAD 9:1 -- so their output ceilings differ by 1.5x. A
-        # single shared clamp is wrong for both at once: it was 19% too
-        # generous on the leg and 21% too tight on the ABAD.
+        # (Haitai HT-04 / HT8115-J6, 48 V). The ABAD default is the 9:1
+        # design value, 1.5x the leg's (44.25 vs 29.5 N.m), but the robot's
+        # ABAD runs the stock 6:1 (log S326), so on the hardware both joints
+        # share the 29.5 N.m stall; CORGI_MAX_TORQUE_ABAD=29.5 simulates
+        # that. The old single shared 35 N.m clamp was 19% too generous on
+        # the leg and 21% too tight against the ABAD's 9:1 design value.
         self.max_torque_leg = (MAX_TORQUE_LEG if max_torque_leg is None
                                else float(max_torque_leg))
         self.max_torque_abad = (MAX_TORQUE_ABAD if max_torque_abad is None

@@ -1300,7 +1300,7 @@ class CorgiDriver:
         fsm_msg = RobotStateStamped()
         fsm_msg.header.seq = self.loop_counter
         fsm_msg.header.stamp = self.ros_time_msg
-        fsm_msg.robot_mode = 3  # standby mode
+        fsm_msg.robot_mode = 3  # ACTIVE (was STANDBY)
         self.fsm_pub.publish(fsm_msg)
 
     def _joint_probe_walk(self, node, path, out, depth=0):

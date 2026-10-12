@@ -1,0 +1,6 @@
+<?xml version="1.0" ?>
+<robot name="ForcePlates">
+    <webots>
+        <plugin type="corgi_driver_pkg.force_plate_driver.ForcePlateDriver" />
+    </webots>
+</robot>

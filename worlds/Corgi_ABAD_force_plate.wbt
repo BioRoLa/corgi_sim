@@ -1,0 +1,252 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "../protos/CorgiRobotABAD.proto"
+
+WorldInfo {
+  basicTimeStep 1
+  FPS 30
+  contactProperties [
+    ContactProperties {
+      material1 "foot_tip"
+      material2 "Floor"
+      coulombFriction [ 1.0 ]
+      maxContactJoints 20
+    }
+    ContactProperties {
+      material1 "wheel_rim"
+      material2 "Floor"
+      coulombFriction [ 1.0 ]
+      maxContactJoints 20
+    }
+    ContactProperties {
+      material1 "Floor"
+      coulombFriction [ 1.0 ]
+      maxContactJoints 20
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.22633165091167332 -0.08808217874169105 0.9700595412569856 3.7398277420353563
+  position 1.4971326253804775 1.4259486054011605 1.0064975008373545
+  follow "CorgiRobotABAD"
+  followType "Pan and Tilt Shot"
+  followSmoothness 0.1
+}
+DEF SUPPORT_BOX Solid {
+  translation 0 0 -0.1185
+  children [
+    Solid {
+      translation -0.17 0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      name "solid(3)"
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
+    Solid {
+      translation -0.17 -0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      name "solid(2)"
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
+    Solid {
+      translation 0.17 -0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
+    Solid {
+      translation 0.17 0.07 0.05
+      children [
+        DEF Cone Shape {
+          appearance PBRAppearance {
+          }
+          geometry Capsule {
+            height 0.1
+            radius 0.03
+            subdivision 16
+          }
+        }
+      ]
+      name "solid(1)"
+      boundingObject USE Cone
+      physics Physics {
+      }
+    }
+    DEF BOX Shape {
+      appearance Appearance {
+      }
+      geometry Box {
+        size 0.4 0.2 0.1
+      }
+    }
+  ]
+  boundingObject USE BOX
+  physics Physics {
+  }
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+  castShadows FALSE
+}
+RectangleArena {
+  translation 0 0.02 -0.17
+  contactMaterial "Floor"
+  floorSize 30 30
+}
+CorgiRobotABAD {
+  translation -0.01 0 0.03
+  controller "<extern>"
+  supervisor TRUE
+}
+# Force plates: same 2x2 layout and numbering as the lab's Vicon/Bertec plates
+# (1 at +x+y, 2 at -x+y, 3 at -x-y, 4 at +x-y), 2 mm thick, 0.5 mm clear of the
+# floor. Published by corgi_driver_pkg/force_plate_driver.py, which subtracts
+# each plate's own weight -- keep its PLATE_MASS equal to the mass below.
+Robot {
+  children [
+    TouchSensor {
+      translation 0.305 0.205 -0.1685
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.75 0.75 0.75
+            roughness 1
+            metalness 0
+          }
+          geometry Box {
+            size 0.6 0.4 0.002
+          }
+        }
+      ]
+      name "force_plate_1"
+      contactMaterial "Floor"
+      boundingObject Box {
+        size 0.6 0.4 0.002
+      }
+      physics Physics {
+        density -1
+        mass 1
+      }
+      type "force-3d"
+      lookupTable []
+    }
+    TouchSensor {
+      translation -0.305 0.205 -0.1685
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.6 0.6 0.6
+            roughness 1
+            metalness 0
+          }
+          geometry Box {
+            size 0.6 0.4 0.002
+          }
+        }
+      ]
+      name "force_plate_2"
+      contactMaterial "Floor"
+      boundingObject Box {
+        size 0.6 0.4 0.002
+      }
+      physics Physics {
+        density -1
+        mass 1
+      }
+      type "force-3d"
+      lookupTable []
+    }
+    TouchSensor {
+      translation -0.305 -0.205 -0.1685
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.75 0.75 0.75
+            roughness 1
+            metalness 0
+          }
+          geometry Box {
+            size 0.6 0.4 0.002
+          }
+        }
+      ]
+      name "force_plate_3"
+      contactMaterial "Floor"
+      boundingObject Box {
+        size 0.6 0.4 0.002
+      }
+      physics Physics {
+        density -1
+        mass 1
+      }
+      type "force-3d"
+      lookupTable []
+    }
+    TouchSensor {
+      translation 0.305 -0.205 -0.1685
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.6 0.6 0.6
+            roughness 1
+            metalness 0
+          }
+          geometry Box {
+            size 0.6 0.4 0.002
+          }
+        }
+      ]
+      name "force_plate_4"
+      contactMaterial "Floor"
+      boundingObject Box {
+        size 0.6 0.4 0.002
+      }
+      physics Physics {
+        density -1
+        mass 1
+      }
+      type "force-3d"
+      lookupTable []
+    }
+  ]
+  name "ForcePlates"
+  controller "<extern>"
+}

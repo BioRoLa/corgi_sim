@@ -3,7 +3,7 @@ import socket
 import launch
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from ament_index_python.packages import get_package_share_directory
 from webots_ros2_driver.webots_launcher import WebotsLauncher
@@ -63,6 +63,31 @@ def generate_launch_description():
         respawn=True
     )
 
+    # Force plates: only worlds that contain the ForcePlates robot
+    # (Corgi_ABAD_force_plate.wbt). A controller for a robot that is not in the
+    # world would wait for it forever. Decided from the world name, and listed
+    # BEFORE `webots`: WebotsLauncher rewrites the 'world' configuration to its
+    # temp copy (tmp..._world_with_URDF_robot.wbt) when it runs, so anything
+    # evaluated after it no longer sees the name. The controller just waits
+    # until the world has loaded.
+    force_plate_driver = WebotsController(
+        robot_name='ForcePlates',
+        port=webots_port,
+        parameters=[
+            {
+                'robot_description': os.path.join(package_dir, 'resource', 'force_plates.urdf'),
+                # every extern controller is a WSL<->Windows round trip per step;
+                # at the 1 ms basic step a second one slowed the sim ~15x
+                'step': int(os.environ.get('CORGI_PLATE_STEP_MS', '8')),
+            }
+        ],
+        respawn=True
+    )
+    force_plates = OpaqueFunction(
+        function=lambda context: [force_plate_driver]
+        if 'force_plate' in LaunchConfiguration('world').perform(context) else []
+    )
+
     # *** 不啟動 corgi_panel — 實驗 / headless 模式不需要 GUI ***
 
     return LaunchDescription([
@@ -72,6 +97,7 @@ def generate_launch_description():
         launch.actions.SetEnvironmentVariable(name='USERNAME', value=launch_user),
         # 告知 driver 跳過初始 PAUSE 並啟用箱子移除邏輯
         launch.actions.SetEnvironmentVariable(name='CORGI_EXPERIMENT_MODE', value='1'),
+        force_plates,
         webots,
         robot_driver,
         launch.actions.RegisterEventHandler(

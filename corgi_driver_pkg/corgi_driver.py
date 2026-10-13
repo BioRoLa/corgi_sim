@@ -204,16 +204,35 @@ DIRBETA_TRANSFORM = os.environ.get('CORGI_DIRBETA_TRANSFORM', '0') == '1'
 # to the L/R applied torques. Off by default; no effect on the dynamics.
 G_JOINT_PROBE = os.environ.get('CORGI_G_JOINT_PROBE', '0') == '1'
 
-# Passive G joint -- DEFAULT ON since 2026-10-13. The proto already closes the
-# leg linkage with SolidReference endpoints (E, C_L, C_R and G per leg), so the
-# old position-controlled G motor (maxTorque 10000) was redundant actuation
-# inside a closed loop, carrying 4-7 N.m per leg that the L/R torques in
-# motor/state never showed; on the robot the joint is passive. Passive, the
-# force-plate rock reads force_estimation's vertical at 0.87 of the plates
-# (was 0.53) and the robot stands and rocks normally. The G motor is put in
-# torque mode at 0 N.m and gets no position target. CORGI_G_JOINT_PASSIVE=0
-# restores the old plant; runs either side of this change are NOT comparable.
-G_JOINT_PASSIVE = os.environ.get('CORGI_G_JOINT_PASSIVE', '1') == '1'
+# G joint model -- CORGI_G_JOINT_MODE, default "gear" since 2026-10-13.
+#
+# On the robot the foot arc at G sits on a planetary gearbox that keeps it
+# tangent to the foot: its angle is a passive, WORKLESS kinematic function of
+# the linkage. The proto puts the foot arc on its own body (Empty_Link_Joint_
+# G_Ref_*) hinged at G, with SolidReferences closing the five-bar.
+#
+#   gear    G motor tracks ang_OGF(MEASURED theta) -- the gear's kinematics --
+#           and its reaction -tau_G * d(target)/d(phi) is applied at the L/R
+#           joints, so the pair does no net work, as a gear. The L/R torques in
+#           motor/state then satisfy tau = -J^T F like the robot's; the
+#           reaction is internal to the mechanism and is NOT reported.
+#   driven  the original: tracks ang_OGF(COMMANDED theta), no reaction. It
+#           injects work and fights the linkage whenever the leg deflects --
+#           measured 4-7 N.m per leg, and force_estimation's vertical read 0.53
+#           of the sim force plates.
+#   passive G motor at 0 N.m: the foot arc becomes a free roller on the G pin,
+#           so every toe force passes through G -- vertical right (0.87) but
+#           plate fz leaked into estimated fx (+/-0.13..0.19).
+# Runs in different modes are NOT comparable. CORGI_G_JOINT_PASSIVE (the
+# 2026-10-13 switch) still works when MODE is unset: 1 = passive, 0 = driven.
+_g_mode = os.environ.get('CORGI_G_JOINT_MODE', '')
+if not _g_mode and 'CORGI_G_JOINT_PASSIVE' in os.environ:
+    _g_mode = 'passive' if os.environ['CORGI_G_JOINT_PASSIVE'] == '1' else 'driven'
+G_JOINT_MODE = _g_mode or 'gear'
+if G_JOINT_MODE not in ('gear', 'driven', 'passive'):
+    raise ValueError("CORGI_G_JOINT_MODE must be gear, driven or passive, not %r" % G_JOINT_MODE)
+G_JOINT_PASSIVE = G_JOINT_MODE == 'passive'
+G_JOINT_GEAR = G_JOINT_MODE == 'gear'
 
 # theta linkage stop (S34's "next thing to worry about", built after S53/S56
 # showed the B/C "windup" is really the leg folding THROUGH the five-bar
@@ -263,6 +282,8 @@ class LegManager:
         self._abad_clamp_warned = False
         # theta linkage stop state (CORGI_THETA_STOP)
         self.prev_theta_meas = None
+        self.g_theta_meas = None   # gear mode: measured theta for the G target
+        self.g_react_r = self.g_react_l = 0.0
         self._theta_stop_warned = False
         # motor_name -> decomposition tuple, refilled every step by
         # _apply_torque_control. Empty unless CORGI_TORQUE_DEBUG=1.
@@ -362,7 +383,7 @@ class LegManager:
             g_joint = robot.getDevice(g_joint_name)
             if g_joint:
                 self.motor_g_joint = g_joint
-                if G_JOINT_PROBE:
+                if G_JOINT_PROBE or G_JOINT_GEAR:
                     g_joint.enableTorqueFeedback(self.basic_time_step)
                 if G_JOINT_PASSIVE:
                     g_joint.setTorque(0.0)   # leaves position control for good
@@ -597,21 +618,48 @@ class LegManager:
                                   f"{tau_stop_l:.1f}/{tau_stop_r:.1f} N.m",
                                   flush=True)
 
+        # --- planetary gear at G (CORGI_G_JOINT_MODE=gear; module header) ---
+        # target f = ang_OGF(theta) - offset, with theta MEASURED. The G motor
+        # enforces it; this applies its reaction -tau_G * df/dpos to the leg
+        # motors so the pair is workless. Raw sensor frame, as the theta stop.
+        self.g_react_r = self.g_react_l = 0.0
+        if G_JOINT_GEAR and self.motor_g_joint and self.leg_model:
+            try:
+                th_g, _ = self.tb.FK(pos_l, pos_r)
+            except Exception:
+                th_g = float("nan")
+            if math.isfinite(th_g):
+                self.g_theta_meas = th_g
+                d_fd = 1e-4
+                try:
+                    th_l, _ = self.tb.FK(pos_l + d_fd, pos_r)
+                    th_r, _ = self.tb.FK(pos_l, pos_r + d_fd)
+                    jl = (th_l - th_g) / d_fd
+                    jr = (th_r - th_g) / d_fd
+                    df = (self._g_target(th_g + d_fd) - self._g_target(th_g - d_fd)) / (2 * d_fd)
+                    tau_g = self.motor_g_joint.getTorqueFeedback()
+                    if all(math.isfinite(v) for v in (jl, jr, df, tau_g)):
+                        self.g_react_l = -tau_g * df * jl
+                        self.g_react_r = -tau_g * df * jr
+                except Exception:
+                    self.g_react_r = self.g_react_l = 0.0
+
         # trq = kp * (phi_desired - phi_actual) + kd * (-phi_dot_actual) + torque_ff
         trq_r, err_r = self._apply_torque_control(
             "R_Motor", cmd_R, pos_r * self.dir_motor_r, vel_r * self.dir_motor_r,
             kp=kp_r, kd=kd_r, torque_ff=torque_r * self.dir_motor_r,
-            torque_stop=tau_stop_r
+            torque_stop=tau_stop_r + self.g_react_r
         )
         trq_l, err_l = self._apply_torque_control(
             "L_Motor", cmd_L, pos_l * self.dir_motor_l, vel_l * self.dir_motor_l,
             kp=kp_l, kd=kd_l, torque_ff=torque_l * self.dir_motor_l,
-            torque_stop=tau_stop_l
+            torque_stop=tau_stop_l + self.g_react_l
         )
         
-        # 保存實際套用的扭矩命令
-        self.cmd_trq_r = trq_r
-        self.cmd_trq_l = trq_l
+        # 保存實際套用的扭矩命令 -- the motor's own torque: the gear reaction is
+        # internal to the mechanism, so it is applied but not reported
+        self.cmd_trq_r = trq_r - self.g_react_r
+        self.cmd_trq_l = trq_l - self.g_react_l
         
         # print debug info
         return "".join([f"[{self.prefix}] Target θ: {theta:.3f} rad, β: {beta:.3f} rad | ",
@@ -682,6 +730,11 @@ class LegManager:
         """
         if G_JOINT_PASSIVE:
             return
+        if G_JOINT_GEAR:
+            # the gear follows the linkage the leg is actually in
+            if self.motor_g_joint and self.leg_model and self.g_theta_meas is not None:
+                self.motor_g_joint.setPosition(self._g_target(self.g_theta_meas))
+            return
         if self.motor_g_joint and self.leg_model:
             self.leg_model.theta = theta
             self.leg_model.beta = beta * self.dir_g_beta
@@ -689,6 +742,13 @@ class LegManager:
             g_joint_target = self.leg_model['ang_OGF'] - self.G_Offset
             self.motor_g_joint.setPosition(g_joint_target)
     
+    def _g_target(self, theta):
+        """G joint angle the foot-arc gear holds at linkage angle theta."""
+        self.leg_model.theta = theta
+        self.leg_model.beta = 0.0
+        self.leg_model.calculate()
+        return self.leg_model.ang_OGF - self.G_Offset
+
     def _find_closest_phi(self, phi_target, phi_current):
         """
         找到最接近的等價角度（處理 2π 週期性）
@@ -825,12 +885,10 @@ class CorgiDriver:
             f"Torque ceilings: leg {self.max_torque_leg:.2f} N.m ({leg_label}), "
             f"ABAD {self.max_torque_abad:.2f} N.m ({abad_label}) "
             f"[defaults = HT-04 stall @ 48 V; env CORGI_MAX_TORQUE / _LEG / _ABAD]")
-        if G_JOINT_PASSIVE:
-            self.__node.get_logger().warn(
-                "G JOINT PASSIVE (default since 2026-10-13): the G motors carry "
-                "0 N.m and get no position target; the proto's SolidReferences "
-                "close the linkage. Not comparable to earlier runs; "
-                "CORGI_G_JOINT_PASSIVE=0 restores the old plant.")
+        self.__node.get_logger().warn(
+            "G JOINT MODE %s (CORGI_G_JOINT_MODE; default gear since 2026-10-13: "
+            "foot-arc planetary with a workless reaction on L/R). Runs in "
+            "different modes are NOT comparable." % G_JOINT_MODE.upper())
         if DIRBETA_TRANSFORM:
             self.__node.get_logger().warn(
                 "DIR_BETA TRANSFORM ON: gains swapped, torques swapped+negated "
@@ -1389,7 +1447,8 @@ class CorgiDriver:
         for leg_id in ('A', 'B', 'C', 'D'):
             leg = self.legs[leg_id]
             g = leg.motor_g_joint.getTorqueFeedback() if leg.motor_g_joint else float('nan')
-            parts.append(f"{leg_id} G {g:+7.2f} R {leg.cmd_trq_r:+6.2f} L {leg.cmd_trq_l:+6.2f}")
+            parts.append(f"{leg_id} G {g:+7.2f} R {leg.cmd_trq_r:+6.2f} L {leg.cmd_trq_l:+6.2f}"
+                         f" react R {leg.g_react_r:+5.2f} L {leg.g_react_l:+5.2f}")
         self.__node.get_logger().info("G_JOINT_PROBE t=%.2f  %s" % (self.__robot.getTime(), " | ".join(parts)))
 
     def log_joint_probe(self):

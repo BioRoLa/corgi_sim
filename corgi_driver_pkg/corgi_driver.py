@@ -204,6 +204,17 @@ DIRBETA_TRANSFORM = os.environ.get('CORGI_DIRBETA_TRANSFORM', '0') == '1'
 # to the L/R applied torques. Off by default; no effect on the dynamics.
 G_JOINT_PROBE = os.environ.get('CORGI_G_JOINT_PROBE', '0') == '1'
 
+# Passive G joint -- DEFAULT ON since 2026-10-13. The proto already closes the
+# leg linkage with SolidReference endpoints (E, C_L, C_R and G per leg), so the
+# old position-controlled G motor (maxTorque 10000) was redundant actuation
+# inside a closed loop, carrying 4-7 N.m per leg that the L/R torques in
+# motor/state never showed; on the robot the joint is passive. Passive, the
+# force-plate rock reads force_estimation's vertical at 0.87 of the plates
+# (was 0.53) and the robot stands and rocks normally. The G motor is put in
+# torque mode at 0 N.m and gets no position target. CORGI_G_JOINT_PASSIVE=0
+# restores the old plant; runs either side of this change are NOT comparable.
+G_JOINT_PASSIVE = os.environ.get('CORGI_G_JOINT_PASSIVE', '1') == '1'
+
 # theta linkage stop (S34's "next thing to worry about", built after S53/S56
 # showed the B/C "windup" is really the leg folding THROUGH the five-bar
 # singularity into an inverted configuration: measured theta passes 17 deg ->
@@ -353,6 +364,8 @@ class LegManager:
                 self.motor_g_joint = g_joint
                 if G_JOINT_PROBE:
                     g_joint.enableTorqueFeedback(self.basic_time_step)
+                if G_JOINT_PASSIVE:
+                    g_joint.setTorque(0.0)   # leaves position control for good
                 self.leg_model = LegModel(sim=True)
                 self.leg_model.forward(math.radians(17), 0.0)
                 self.G_Offset = self.leg_model['ang_OGF']
@@ -667,6 +680,8 @@ class LegManager:
             theta: 腿部伸展角 (rad)
             beta: 腿部旋轉角 (rad)
         """
+        if G_JOINT_PASSIVE:
+            return
         if self.motor_g_joint and self.leg_model:
             self.leg_model.theta = theta
             self.leg_model.beta = beta * self.dir_g_beta
@@ -810,6 +825,12 @@ class CorgiDriver:
             f"Torque ceilings: leg {self.max_torque_leg:.2f} N.m ({leg_label}), "
             f"ABAD {self.max_torque_abad:.2f} N.m ({abad_label}) "
             f"[defaults = HT-04 stall @ 48 V; env CORGI_MAX_TORQUE / _LEG / _ABAD]")
+        if G_JOINT_PASSIVE:
+            self.__node.get_logger().warn(
+                "G JOINT PASSIVE (default since 2026-10-13): the G motors carry "
+                "0 N.m and get no position target; the proto's SolidReferences "
+                "close the linkage. Not comparable to earlier runs; "
+                "CORGI_G_JOINT_PASSIVE=0 restores the old plant.")
         if DIRBETA_TRANSFORM:
             self.__node.get_logger().warn(
                 "DIR_BETA TRANSFORM ON: gains swapped, torques swapped+negated "

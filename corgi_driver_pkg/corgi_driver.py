@@ -196,6 +196,14 @@ JOINT_PROBE_INTERVAL = 50   # steps at 1 kHz -> 20 Hz
 # default; runs with it on are NOT comparable to any prior campaign.
 DIRBETA_TRANSFORM = os.environ.get('CORGI_DIRBETA_TRANSFORM', '0') == '1'
 
+# G_Joint load probe (2026-10-12). The G joint closes the leg linkage and is
+# driven by setPosition with maxTorque 10000 in the proto, so it can carry leg
+# load that never appears in the L/R motor torques motor/state reports. The
+# sim force plates read ~2x what force_estimation derives from those torques.
+# With this on, the G joint's torque feedback is logged ~1/s (sim time) next
+# to the L/R applied torques. Off by default; no effect on the dynamics.
+G_JOINT_PROBE = os.environ.get('CORGI_G_JOINT_PROBE', '0') == '1'
+
 # theta linkage stop (S34's "next thing to worry about", built after S53/S56
 # showed the B/C "windup" is really the leg folding THROUGH the five-bar
 # singularity into an inverted configuration: measured theta passes 17 deg ->
@@ -343,6 +351,8 @@ class LegManager:
             g_joint = robot.getDevice(g_joint_name)
             if g_joint:
                 self.motor_g_joint = g_joint
+                if G_JOINT_PROBE:
+                    g_joint.enableTorqueFeedback(self.basic_time_step)
                 self.leg_model = LegModel(sim=True)
                 self.leg_model.forward(math.radians(17), 0.0)
                 self.G_Offset = self.leg_model['ang_OGF']
@@ -1351,6 +1361,16 @@ class CorgiDriver:
             except Exception:
                 continue
 
+    def log_g_joint(self):
+        if not G_JOINT_PROBE or self.loop_counter % 1000 != 0:
+            return
+        parts = []
+        for leg_id in ('A', 'B', 'C', 'D'):
+            leg = self.legs[leg_id]
+            g = leg.motor_g_joint.getTorqueFeedback() if leg.motor_g_joint else float('nan')
+            parts.append(f"{leg_id} G {g:+7.2f} R {leg.cmd_trq_r:+6.2f} L {leg.cmd_trq_l:+6.2f}")
+        self.__node.get_logger().info("G_JOINT_PROBE t=%.2f  %s" % (self.__robot.getTime(), " | ".join(parts)))
+
     def log_joint_probe(self):
         """(#33 / S280) Long-format dump of every solid's LOCAL rotation --
         the joint state of every hinge, sensed or not. No-op unless
@@ -1682,6 +1702,8 @@ class CorgiDriver:
         self.log_joint_probe()
         # Torque decomposition (no-op unless CORGI_TORQUE_DEBUG=1)
         self.log_torque_terms()
+        # G_Joint load probe (no-op unless CORGI_G_JOINT_PROBE=1)
+        self.log_g_joint()
         # FSM
         self.pub_fsm()
         

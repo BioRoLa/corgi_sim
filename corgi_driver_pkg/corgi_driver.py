@@ -7,6 +7,8 @@ from controller import Supervisor
 
 # --- [新增] Supervisor 與 TF 相關模組 ---
 from rosgraph_msgs.msg import Clock
+from std_msgs.msg import Float64MultiArray
+from rclpy.qos import QoSProfile, DurabilityPolicy
 from corgi_msgs.msg import TriggerStamped
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import TransformStamped
@@ -239,6 +241,17 @@ class LegManager:
         控制律:
             τ = kp × (φ_desired - φ_actual) + kd × (-φ̇_actual) + τ_feedforward
         """
+        # Joint direction changes can swap the virtual L/R axes. Transform
+        # diagonal gains and feedforward consistently with the published states.
+        same = (self.dir_beta + self.dir_theta) / 2.0
+        cross = (self.dir_beta - self.dir_theta) / 2.0
+        kp_l, kp_r = (same * same * kp_l + cross * cross * kp_r,
+                      cross * cross * kp_l + same * same * kp_r)
+        kd_l, kd_r = (same * same * kd_l + cross * cross * kd_r,
+                      cross * cross * kd_l + same * same * kd_r)
+        torque_l, torque_r = (same * torque_l + cross * torque_r,
+                              cross * torque_l + same * torque_r)
+
         # 限制最小角度
         theta_0 = math.radians(17)
         if theta < theta_0:
@@ -366,13 +379,19 @@ class LegManager:
         msg.gamma = float(pos_h)
         
         # 直接使用控制器中計算的速度（已經過濾波）
-        msg.velocity_l = float(self.current_vel_l * self.dir_motor_l)
-        msg.velocity_r = float(self.current_vel_r * self.dir_motor_r)
+        same = (self.dir_beta + self.dir_theta) / 2.0
+        cross = (self.dir_beta - self.dir_theta) / 2.0
+        vel_l = self.current_vel_l * self.dir_motor_l
+        vel_r = self.current_vel_r * self.dir_motor_r
+        msg.velocity_l = float(same * vel_l + cross * vel_r)
+        msg.velocity_r = float(cross * vel_l + same * vel_r)
         msg.velocity_h = float(self.current_vel_h)
         
         # 發布扭矩命令值（命令扭矩，而非回饋）
-        msg.torque_r = float(self.cmd_trq_r * self.dir_motor_r)
-        msg.torque_l = float(self.cmd_trq_l * self.dir_motor_l)
+        torque_l = self.cmd_trq_l * self.dir_motor_l
+        torque_r = self.cmd_trq_r * self.dir_motor_r
+        msg.torque_l = float(same * torque_l + cross * torque_r)
+        msg.torque_r = float(cross * torque_l + same * torque_r)
         msg.torque_h = float(self.cmd_trq_h)
         return msg
     
@@ -427,6 +446,15 @@ class CorgiDriver:
             )
             for leg_id in ('A', 'B', 'C', 'D')
         }
+
+        # Publish the directions actually loaded by this driver (YAML or fallback).
+        # Transient-local delivery also serves controllers started after Webots.
+        direction_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.direction_pub = self.__node.create_publisher(Float64MultiArray, 'motor/directions', direction_qos)
+        directions = Float64MultiArray()
+        directions.data = [value for leg in self.legs.values() for value in (
+            leg.dir_theta, leg.dir_beta, leg.dir_motor_l, leg.dir_motor_r, leg.dir_abad)]
+        self.direction_pub.publish(directions)
 
         # 4. initialize IMU
         self.imu_sensor = imu(self.__robot, self.__node, basic_time_step=self.__timestep)

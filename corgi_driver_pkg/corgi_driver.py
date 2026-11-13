@@ -192,9 +192,14 @@ JOINT_PROBE_INTERVAL = 50   # steps at 1 kHz -> 20 Hz
 # confounded: on B/C the un-mirrored terms accidentally CANCEL (corr -0.96),
 # suppressing their demand ~3x, so removing the bug un-masks real demand and
 # looks bad exactly when the ceiling clips it. This flag exists to re-judge the
-# fix with the ceiling raised, where its own dynamics are visible. Off by
-# default; runs with it on are NOT comparable to any prior campaign.
-DIRBETA_TRANSFORM = os.environ.get('CORGI_DIRBETA_TRANSFORM', '0') == '1'
+# fix with the ceiling raised, where its own dynamics are visible.
+#
+# DEFAULT ON since 2026-11-13 (CONVENTIONS.md at the top of corgi_ros2_ws):
+# one convention above the boundary, and the robot bridge now converts
+# torques, velocities and gains the same way (corgi_utils/module_frame.hpp),
+# so sim and robot share the plant. CORGI_DIRBETA_TRANSFORM=0 restores the old
+# half-conversion; runs either side of the switch are NOT comparable.
+DIRBETA_TRANSFORM = os.environ.get('CORGI_DIRBETA_TRANSFORM', '1') == '1'
 
 # G_Joint load probe (2026-10-12). The G joint closes the leg linkage and is
 # driven by setPosition with maxTorque 10000 in the proto, so it can carry leg
@@ -891,9 +896,15 @@ class CorgiDriver:
             "different modes are NOT comparable." % G_JOINT_MODE.upper())
         if DIRBETA_TRANSFORM:
             self.__node.get_logger().warn(
-                "DIR_BETA TRANSFORM ON: gains swapped, torques swapped+negated "
-                "on dir_beta=-1 legs; reported torques converted back. Runs "
-                "are NOT comparable to any untransformed campaign.")
+                "DIR_BETA TRANSFORM ON (default since 2026-11-13, CONVENTIONS.md): "
+                "gains swapped, torques swapped+negated on dir_beta=-1 legs; "
+                "reported torques converted back. Runs are NOT comparable to "
+                "any untransformed campaign.")
+        else:
+            self.__node.get_logger().warn(
+                "DIR_BETA TRANSFORM OFF (CORGI_DIRBETA_TRANSFORM=0): LEGACY "
+                "half-conversion -- B/C positions mirrored, torques and gains "
+                "not. Matches neither the convention nor the robot bridge.")
         if THETA_STOP:
             self.__node.get_logger().warn(
                 "THETA LINKAGE STOP ON: theta bounded to [%.1f, %.1f] deg, "
@@ -1204,8 +1215,9 @@ class CorgiDriver:
                 # Position AND torque cross the same boundary together. They
                 # used to disagree: the pose was mirrored for dir_beta = -1
                 # legs while the feedforward torque was not.
-                # NOTE: convert_torque / convert_gains are applied ONLY under
-                # CORGI_DIRBETA_TRANSFORM=1 (default off). History: adopted
+                # NOTE: convert_torque / convert_gains are applied under
+                # CORGI_DIRBETA_TRANSFORM, ON by default since 2026-11-13
+                # (=0 for the legacy plant). History: adopted
                 # 2026-08-08, measured worse at the 35 N.m clamp, reverted.
                 # The 2026-08-17 decomposition showed that judgement was
                 # confounded -- on B/C the un-mirrored terms accidentally

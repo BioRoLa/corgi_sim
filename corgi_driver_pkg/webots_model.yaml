@@ -1,0 +1,16 @@
+# Webots-model details of each leg, for corgi_driver.py. NOT frame
+# conventions: the per-leg directions theta, beta and gamma are in the one
+# table the robot bridge also reads, corgi_utils/config/module_directions.yaml
+# (CONVENTIONS.md section 5), and this file may not set them.
+#
+#   g_joint_beta  sense of beta in the G joint's linkage target; used only by
+#                 the 'driven' G-joint mode (CORGI_G_JOINT_MODE=driven)
+#   motor_l/r     raw polarity of the proto's L/R motors. +1 on every leg, and
+#                 _find_closest_phi and the theta stop assume so.
+#
+# Read at driver start-up from the installed copy: colcon build
+# --packages-select corgi_sim after an edit.
+A: {g_joint_beta: -1, motor_l: 1, motor_r: 1}
+B: {g_joint_beta: -1, motor_l: 1, motor_r: 1}
+C: {g_joint_beta: -1, motor_l: 1, motor_r: 1}
+D: {g_joint_beta: -1, motor_l: 1, motor_r: 1}

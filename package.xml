@@ -16,6 +16,10 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>corgi_msgs</depend>
+  <!-- share/corgi_utils/config/module_directions.yaml: the per-leg directions
+       the robot bridge also reads (CONVENTIONS.md) -->
+  <exec_depend>corgi_utils</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   
   <export>
     <build_type>ament_cmake</build_type>

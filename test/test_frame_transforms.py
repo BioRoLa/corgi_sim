@@ -13,8 +13,19 @@ the two can never drift apart again.
     python3 -m pytest test/test_frame_transforms.py
 """
 import math
+import os
+import sys
 
 import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+from corgi_driver_pkg import module_directions  # noqa: E402  (no Webots import)
+
+# The one direction table, in the source tree next to this package: the file the
+# robot bridge and the sim driver both read once installed (CONVENTIONS.md).
+SHARED_TABLE = os.path.join(HERE, '..', '..', 'corgi_utils', 'config',
+                            'module_directions.yaml')
 
 
 class FakeLeg:
@@ -60,9 +71,9 @@ FakeLeg.convert_gains = _convert_gains
 # dir_theta < 0 is deliberately unsupported (the 17 deg coupling offset breaks
 # the clean swap), so only the theta = +1 combinations are exercised.
 ALL_DIRS = [(1.0, b) for b in (1.0, -1.0)]
-# From motor_config.yaml: A and D are +1, B and C are -1.
-REAL_DIRS = {"A": (1.0, 1.0), "B": (1.0, -1.0),
-             "C": (1.0, -1.0), "D": (1.0, 1.0)}
+# (theta, beta) per leg from the shared table: A and D are +1, B and C are -1.
+REAL_DIRS = {leg: (d['theta'], d['beta']) for leg, d in
+             module_directions.load_frame_directions(SHARED_TABLE)[0].items()}
 
 THETA_0 = math.radians(17.0)
 
@@ -140,7 +151,7 @@ def test_unmirrored_leg_is_untouched():
 
 @pytest.mark.parametrize("leg_id", sorted(REAL_DIRS))
 def test_every_configured_leg_round_trips(leg_id):
-    """Guards the shipped motor_config.yaml, not just hypothetical signs."""
+    """Guards the shipped direction table, not just hypothetical signs."""
     leg = FakeLeg(*REAL_DIRS[leg_id])
     theta, beta, tau = 1.75, -0.3, (5.0, 1.5)
     assert leg.module_to_ros(*leg.ros_to_module(theta, beta)) == (theta, beta)
@@ -214,3 +225,61 @@ def test_the_regression_itself():
     tau = (6.0, -1.0)
     assert a.convert_torque(*tau) == tau, "unmirrored leg should pass through"
     assert b.convert_torque(*tau) != tau, "mirrored leg must be transformed"
+
+
+# ---- the tables themselves ---------------------------------------------------
+
+def test_shared_table_is_the_convention():
+    """CONVENTIONS.md section 5, and what the bridge's gtest also checks."""
+    rows, _ = module_directions.load_frame_directions(SHARED_TABLE)
+    assert {leg: (d['theta'], d['beta'], d['gamma']) for leg, d in rows.items()} == {
+        'A': (1.0, 1.0, 1.0), 'B': (1.0, -1.0, -1.0),
+        'C': (1.0, -1.0, 1.0), 'D': (1.0, 1.0, -1.0)}
+
+
+def test_driver_config_combines_both_files():
+    cfg, path = module_directions.load_leg_config(table=SHARED_TABLE)
+    assert path == SHARED_TABLE
+    for leg in module_directions.LEGS:
+        assert set(cfg[leg]) == set(module_directions.FRAME_KEYS + module_directions.MODEL_KEYS)
+        assert cfg[leg]['motor_l'] == cfg[leg]['motor_r'] == 1.0
+
+
+def _write(tmp_path, name, text):
+    p = tmp_path / name
+    p.write_text(text)
+    return str(p)
+
+
+GOOD = ("A: {theta: 1, beta: 1, gamma: 1}\n"
+        "B: {theta: 1, beta: -1, gamma: -1}\n"
+        "C: {theta: 1, beta: -1, gamma: 1}\n")
+
+
+@pytest.mark.parametrize("last_row", [
+    "",                                         # leg D missing
+    "D: {theta: 1, beta: 1}\n",                 # gamma missing
+    "D: {theta: 1, beta: 0.5, gamma: -1}\n",    # not a unit direction
+    "D: {theta: -1, beta: 1, gamma: -1}\n",     # theta mirror
+    "D: {theta: 1, beta: true, gamma: -1}\n",   # a bool is not +1
+    "D: {theta: 1, beta: 1, gamma: -1, g_joint_beta: -1}\n",  # Webots key
+])
+def test_bad_shared_table_stops_the_driver(tmp_path, last_row):
+    with pytest.raises(ValueError):
+        module_directions.load_frame_directions(_write(tmp_path, 't.yaml', GOOD + last_row))
+
+
+def test_old_format_is_rejected(tmp_path):
+    """The pre-2026-11-13 motor_config.yaml layout must not be half-read."""
+    old = "".join(f"{leg}: {{joint_dir: {{theta: 1, beta: 1}}, motor_dir: {{ABAD: 1}}}}\n"
+                  for leg in module_directions.LEGS)
+    with pytest.raises(ValueError):
+        module_directions.load_frame_directions(_write(tmp_path, 'old.yaml', old))
+
+
+def test_webots_model_file_may_not_carry_frame_directions(tmp_path):
+    """The second copy of the table is what this change removed; keep it gone."""
+    text = "".join(f"{leg}: {{g_joint_beta: -1, motor_l: 1, motor_r: 1, beta: 1}}\n"
+                   for leg in module_directions.LEGS)
+    with pytest.raises(ValueError, match="belong in corgi_utils"):
+        module_directions.load_model_directions(_write(tmp_path, 'm.yaml', text))

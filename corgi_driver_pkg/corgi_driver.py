@@ -23,7 +23,7 @@ from corgi_msgs.msg import SimLegContactStamped, SimLegContact
 
 from . import Controller_TB
 from .LegModel import LegModel
-from .motor_config import LEG_CONFIG
+from . import module_directions
 
 
 # ABAD joint range, radians. The real mechanism stops at about +/-70 deg; the
@@ -33,15 +33,11 @@ from .motor_config import LEG_CONFIG
 ABAD_LIMIT_RAD = math.radians(float(os.environ.get("CORGI_ABAD_LIMIT_DEG", "70")))
 
 
-def _load_leg_config():
-    """從與本模組相同目錄的 motor_config.yaml 讀取關節方向設定。
-    修改 YAML 後直接重啟 Webots 即可，不需要 colcon build。"""
-    yaml_path = os.path.join(os.path.dirname(__file__), 'motor_config.yaml')
-    with open(yaml_path, 'r') as f:
-        return yaml.safe_load(f)
-
-
-LEG_CONFIG = _load_leg_config()
+# Per-leg directions: theta/beta/gamma from the one table the robot bridge also
+# reads (corgi_utils/config/module_directions.yaml, CONVENTIONS.md section 5),
+# plus the Webots model's own G-joint and motor polarity (webots_model.yaml).
+# A bad or missing table raises here, so the driver does not start on guesses.
+LEG_CONFIG, LEG_CONFIG_PATH = module_directions.load_leg_config()
 
 class imu:
     def __init__(self, robot, node, basic_time_step=1):
@@ -297,15 +293,17 @@ class LegManager:
         self.sensors = {}
         self.tb = controller_tb
 
-        cfg = leg_config or {}
-        jdir = cfg.get('joint_dir', {})
-        mdir = cfg.get('motor_dir', {})
-        self.dir_theta    = jdir.get('theta',        1.0)
-        self.dir_beta     = jdir.get('beta',         1.0)
-        self.dir_g_beta   = jdir.get('g_joint_beta', 1.0)
-        self.dir_motor_l  = mdir.get('L',    1.0)
-        self.dir_motor_r  = mdir.get('R',    1.0)
-        self.dir_abad     = mdir.get('ABAD', 1.0)
+        # module_directions.load_leg_config() row; every key is required
+        if leg_config is None:
+            raise ValueError(f"[{prefix}] LegManager needs its row of the "
+                             "direction table (module_directions.load_leg_config)")
+        cfg = leg_config
+        self.dir_theta    = cfg['theta']
+        self.dir_beta     = cfg['beta']
+        self.dir_abad     = cfg['gamma']   # ABAD position, velocity and torque
+        self.dir_g_beta   = cfg['g_joint_beta']
+        self.dir_motor_l  = cfg['motor_l']
+        self.dir_motor_r  = cfg['motor_r']
         motor_names = ["L_Motor", "R_Motor"]
         self.prev_pos_l = None
         self.prev_pos_r = None
@@ -580,7 +578,7 @@ class LegManager:
         # engaged only outside the range, mapped to the two motors by the
         # numerical Jacobian transpose of theta(phi_L, phi_R) so it acts on
         # theta and does no work on beta. Computed in the raw sensor frame
-        # (dir_motor is 1.0 for every leg motor in motor_config.yaml -- the
+        # (dir_motor is 1.0 for every leg motor in webots_model.yaml -- the
         # same assumption _find_closest_phi already makes above).
         tau_stop_r = tau_stop_l = 0.0
         if THETA_STOP:
@@ -855,7 +853,7 @@ class CorgiDriver:
         self.max_torque_leg, self.max_torque_abad = resolve_torque_limits()
         self.trq_feedforward = 0  # N·m 前饋扭矩
         
-        # 3. initialize Legs (direction config loaded from motor_config.py)
+        # 3. initialize Legs (directions: module_directions.load_leg_config)
         self.legs = {
             leg_id: LegManager(
                 self.__robot,
@@ -894,6 +892,12 @@ class CorgiDriver:
             "G JOINT MODE %s (CORGI_G_JOINT_MODE; default gear since 2026-10-13: "
             "foot-arc planetary with a workless reaction on L/R). Runs in "
             "different modes are NOT comparable." % G_JOINT_MODE.upper())
+        self.__node.get_logger().info(
+            "Leg module directions (shared with the robot bridge): %s  %s" % (
+                LEG_CONFIG_PATH, "  ".join(
+                    "%s theta %+.0f beta %+.0f gamma %+.0f" % (
+                        leg, c['theta'], c['beta'], c['gamma'])
+                    for leg, c in sorted(LEG_CONFIG.items()))))
         if DIRBETA_TRANSFORM:
             self.__node.get_logger().warn(
                 "DIR_BETA TRANSFORM ON (default since 2026-11-13, CONVENTIONS.md): "

@@ -22,7 +22,7 @@ def generate_launch_description():
     webots_port = str(_find_free_port(start_port=int(os.environ.get('WEBOTS_PORT', '1234'))))
     
     # 1. 設定 Webots 世界檔路徑
-    world_path = os.path.join(package_dir, 'worlds', "IFS_force_plate_Proto" + ".wbt") # corgi_origin // IFS_Proto // Corgi_ABAD
+    world_path = os.path.join(package_dir, 'worlds', 'IFS_force_plate_axis_test.wbt')
 
     # 2. 啟動 Webots
     webots = WebotsLauncher(
@@ -68,6 +68,7 @@ def generate_launch_description():
     return LaunchDescription([
         launch.actions.SetEnvironmentVariable(name='USER', value=launch_user),
         launch.actions.SetEnvironmentVariable(name='USERNAME', value=launch_user),
+        launch.actions.SetEnvironmentVariable(name='CORGI_EXPERIMENT_MODE', value='1'),
         webots,
         robot_driver,
         force_plate_driver,

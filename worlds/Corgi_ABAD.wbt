@@ -10,6 +10,7 @@ WorldInfo {
   contactProperties [
     ContactProperties {
       material1 "Floor"
+      bounce 0
       maxContactJoints 20
     }
   ]

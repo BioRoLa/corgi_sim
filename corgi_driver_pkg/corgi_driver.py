@@ -422,7 +422,8 @@ class CorgiDriver:
         self.clock_pub = self.__node.create_publisher(Clock, 'clock', 1000)
         
         # 建立 TF 廣播器 (讓 Rviz 知道機器人在哪)
-        self.tf_broadcaster = TransformBroadcaster(self.__node) 
+        self.tf_broadcaster = TransformBroadcaster(self.__node)
+        self.body_velocity_pub = self.__node.create_publisher(Vector3, 'sim/body/velocity', 10)
         
         # Fixed PID parameters (not using ROS2 parameter)
         # TUNED Params
@@ -649,6 +650,9 @@ class CorgiDriver:
         if self.__self_node:
             # 取得絕對位置 (X, Y, Z)
             pos = self.__self_node.getPosition()
+            # Webots returns world-frame linear velocity followed by angular velocity.
+            vx, vy, vz = self.__self_node.getVelocity()[:3]
+            self.body_velocity_pub.publish(Vector3(x=vx, y=vy, z=vz))
             # 取得旋轉 (Axis-Angle: [x, y, z, angle])
             rot_field = self.__self_node.getField("rotation")
             if rot_field:
